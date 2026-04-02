@@ -24,6 +24,7 @@ class lexer:
         self.codes: str = codes
         self.position: int = 0
         self.line: int = 1
+        self.macro_definitions: dict[str,str] = {}
         self.tokens: list[token] = []
     def tokenize(self):
         while self.position < len(self.codes):
@@ -48,11 +49,55 @@ class lexer:
                     if(self.position+1 >= len(self.codes)):
                         raise Exception(f"Unterminated multi-line comment at line {self.line}")
                     self.position+=2#skip the closing */
+            #preprocessor directive
             elif(cur_token == '#'):
-                pass
-                self.position+=8#skip #define
+                macro_type: str= ""
                 macro_name: str = ""
-                macro_value: int = 0
+                macro_value_str: str = ""
+                while (self.position < len(self.codes) and self.codes[self.position] != '\n' and self.codes[self.position] != ' ' and self.codes[self.position] != '\t'):
+                    macro_type += self.codes[self.position]
+                    self.position+=1
+                if(self.position >= len(self.codes) or self.codes[self.position] == '\n'):
+                    raise Exception(f"Syntax error: Invalid preprocessor directive at line {self.line}: missing macro type")
+                elif(macro_type != '#define'):
+                    raise Exception(f"Syntax error: Unsupported preprocessor directive: {macro_type} at line {self.line}")
+                else:
+                    #skip spaces/tabs
+                    while(self.position < len(self.codes) and (self.codes[self.position] == ' ' or self.codes[self.position] == '\t')):
+                        self.position+=1
+                    if(self.position >= len(self.codes) or self.codes[self.position] == '\n'):
+                        raise Exception(f"Syntax error: Invalid preprocessor directive at line {self.line}: missing macro name and value")
+                    while (self.position < len(self.codes) and self.codes[self.position] != '\n' and self.codes[self.position] != ' ' and self.codes[self.position] != '\t'):
+                        #macro name must be a valid identifier
+                        if(self.codes[self.position].isalpha() or self.codes[self.position]=="_" or self.codes[self.position].isdigit() ):
+                            macro_name += self.codes[self.position]
+                            self.position+=1
+                        else:
+                            raise Exception(f"Syntax error: Invalid macro character: {self.codes[self.position]} at line {self.line}")
+                    if(self.position >= len(self.codes) or self.codes[self.position] == '\n'):
+                        raise Exception(f"Syntax error: Invalid preprocessor directive at line {self.line}: missing macro value")
+                    elif(macro_name in self.macro_definitions):
+                        raise Exception(f"Syntax error: Duplicate macro definition: {macro_name} at line {self.line}")
+                    elif(macro_name in keywords):
+                        raise Exception(f"Syntax error: Macro name cannot be a keyword: {macro_name} at line {self.line}")
+                    elif(macro_name[0].isdigit()):
+                        raise Exception(f"Syntax error: Macro name cannot start with a digit: {macro_name} at line {self.line}")
+                    else:
+                        #macro value must be a number
+                        #skip spaces/tabs
+                        while(self.position < len(self.codes) and (self.codes[self.position] == ' ' or self.codes[self.position] == '\t')):
+                            self.position+=1
+                        if(self.position >= len(self.codes) or self.codes[self.position] == '\n'):
+                            raise Exception(f"Syntax error: Invalid preprocessor directive at line {self.line}: missing macro value")
+                        while (self.position < len(self.codes) and self.codes[self.position] != '\n' and self.codes[self.position] != ' ' and self.codes[self.position] != '\t'):
+                            if(self.codes[self.position].isdigit() or (self.codes[self.position] == '-' and len(macro_value_str) == 0)):
+                                macro_value_str += self.codes[self.position]
+                                self.position+=1
+                            else:
+                                raise Exception(f"Syntax error: Invalid macro value: {macro_value_str} at line {self.line}")
+                        if(macro_value_str == '-' or macro_value_str == ''):
+                            raise Exception(f"Syntax error: Invalid macro value: {macro_value_str} at line {self.line}")
+                        self.macro_definitions[macro_name] = macro_value_str
             elif(cur_token in oprators):
                 oprator = cur_token
                 self.position+=1
@@ -60,7 +105,7 @@ class lexer:
                     oprator += self.codes[self.position]
                     self.position+=1
                 self.tokens.append(token(token_type.operator,self.line,oprator))
-            #keyword int,char,void,if,else,else,while,for,return
+            #keyword int,char,void,if,else,else,while,for,return,do,continue,break or identifier
             elif(cur_token.isalpha() or cur_token=="_"):
                 ident=cur_token
                 self.position+=1
@@ -71,7 +116,14 @@ class lexer:
                 if(ident in keywords):
                     self.tokens.append(token(token_type.keyword,self.line,ident))
                 else:
-                    self.tokens.append(token(token_type.identifier,self.line,ident))
+                    if(ident in self.macro_definitions):
+                        if(self.macro_definitions[ident].startswith('-')):
+                            self.tokens.append(token(token_type.operator,self.line,'-'))
+                            self.tokens.append(token(token_type.number,self.line,self.macro_definitions[ident][1:]))
+                        else:
+                            self.tokens.append(token(token_type.number,self.line,self.macro_definitions[ident]))
+                    else:
+                        self.tokens.append(token(token_type.identifier,self.line,ident))
             #number or hexadecimal
             elif(cur_token.isdigit()):
                 num=cur_token
