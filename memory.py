@@ -66,7 +66,7 @@ class VirtualMemory:
         return addr
     
     def alloc_stack(self, size):
-        #分配全域空間
+        #分配區域空間
         addr = self.stack_top
         self.stack_top -= size
         if self.global_top >= self.stack_top:
