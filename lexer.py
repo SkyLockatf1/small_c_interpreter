@@ -1,6 +1,8 @@
 import enum
 
 class token_type(enum.Enum):
+    """詞法分析後可產生的 token 類型。"""
+
     keyword = 1
     number = 2
     hexadecimal = 3
@@ -11,6 +13,8 @@ class token_type(enum.Enum):
     punctuator = 8
     
 class token:
+    """單一 token 的資料結構：包含類型、行號與原始值。"""
+
     def __init__(self, type: token_type,line: int, value: str):
         self.type: token_type = type
         self.line: int = line
@@ -20,6 +24,8 @@ oprators = ["!","~","+", "-", "*", "/", "%", "<", ">", "=", "&", "^", "|"]
 oprators_2 = ["++","--","==","!=","<=",">=","&&","||","<<",">>","+=","-=","*=","/=","%="]
 punctuator= [";","(",")","{","}","[","]",",",".","?",":"]
 class lexer:
+    """將原始程式碼字串切分成 token 串列的詞法分析器。"""
+
     def __init__(self,codes: str):
         self.codes: str = codes
         self.position: int = 0
@@ -29,31 +35,34 @@ class lexer:
     def tokenize(self):
         while self.position < len(self.codes):
             cur_token = self.codes[self.position]
-            #skip spaces/line breaks/tabs
+            # 跳過空白、換行與 tab
             if (cur_token.isspace() or cur_token == '\n' or cur_token == '\t'):
                 if cur_token == '\n':
                     self.line += 1
                 self.position+=1
-            #comment
+            # 註解
             elif(self.position+1 < len(self.codes) and self.codes[self.position:self.position+2] in ['/*','//']):
-                #single line comment
+                # 單行註解
                 if(self.codes[self.position:self.position+2]=='//'):
+                    # 直接前進到換行字元前
                     while (self.position < len(self.codes) and self.codes[self.position] != '\n'):
                         self.position+=1
-                #multi line comment
+                # 多行註解
                 else:
+                    # 持續掃描直到遇到結尾 */
                     while (self.position+1 < len(self.codes) and self.codes[self.position:self.position+2] != '*/'):
                         if(self.codes[self.position] == '\n'):
                             self.line += 1
                         self.position+=1
                     if(self.position+1 >= len(self.codes)):
                         raise Exception(f"Unterminated multi-line comment at line {self.line}")
-                    self.position+=2#skip the closing */
-            #preprocessor directive
+                    self.position+=2# 跳過結尾 */
+            # 前處理器指令
             elif(cur_token == '#'):
                 macro_type: str= ""
                 macro_name: str = ""
                 macro_value_str: str = ""
+                # 先讀出 directive 類型（例如 #define）
                 while (self.position < len(self.codes) and self.codes[self.position] != '\n' and self.codes[self.position] != ' ' and self.codes[self.position] != '\t'):
                     macro_type += self.codes[self.position]
                     self.position+=1
@@ -62,13 +71,14 @@ class lexer:
                 elif(macro_type != '#define'):
                     raise Exception(f"Syntax error: Unsupported preprocessor directive: {macro_type} at line {self.line}")
                 else:
-                    #skip spaces/tabs
+                    # 跳過空白與 tab
                     while(self.position < len(self.codes) and (self.codes[self.position] == ' ' or self.codes[self.position] == '\t')):
                         self.position+=1
                     if(self.position >= len(self.codes) or self.codes[self.position] == '\n'):
                         raise Exception(f"Syntax error: Invalid preprocessor directive at line {self.line}: missing macro name and value")
+                    # 讀取巨集名稱
                     while (self.position < len(self.codes) and self.codes[self.position] != '\n' and self.codes[self.position] != ' ' and self.codes[self.position] != '\t'):
-                        #macro name must be a valid identifier
+                        # 巨集名稱必須是合法識別字
                         if(self.codes[self.position].isalpha() or self.codes[self.position]=="_" or self.codes[self.position].isdigit() ):
                             macro_name += self.codes[self.position]
                             self.position+=1
@@ -83,12 +93,13 @@ class lexer:
                     elif(macro_name[0].isdigit()):
                         raise Exception(f"Syntax error: Macro name cannot start with a digit: {macro_name} at line {self.line}")
                     else:
-                        #macro value must be a number
-                        #skip spaces/tabs
+                        # 巨集值目前只允許數字（可含負號）
+                        # 跳過空白與 tab
                         while(self.position < len(self.codes) and (self.codes[self.position] == ' ' or self.codes[self.position] == '\t')):
                             self.position+=1
                         if(self.position >= len(self.codes) or self.codes[self.position] == '\n'):
                             raise Exception(f"Syntax error: Invalid preprocessor directive at line {self.line}: missing macro value")
+                        # 讀取巨集值（僅接受可選負號 + 數字）
                         while (self.position < len(self.codes) and self.codes[self.position] != '\n' and self.codes[self.position] != ' ' and self.codes[self.position] != '\t'):
                             if(self.codes[self.position].isdigit() or (self.codes[self.position] == '-' and len(macro_value_str) == 0)):
                                 macro_value_str += self.codes[self.position]
@@ -101,14 +112,16 @@ class lexer:
             elif(cur_token in oprators):
                 oprator = cur_token
                 self.position+=1
+                # 若可組成雙字元運算子則一併吃掉下一字元
                 if (self.position < len(self.codes) and self.codes[self.position-1:self.position+1] in oprators_2):
                     oprator += self.codes[self.position]
                     self.position+=1
                 self.tokens.append(token(token_type.operator,self.line,oprator))
-            #keyword int,char,void,if,else,else,while,for,return,do,continue,break or identifier
+            # 關鍵字或識別字
             elif(cur_token.isalpha() or cur_token=="_"):
                 ident=cur_token
                 self.position+=1
+                # 持續累積識別字後續字元
                 while (self.position < len(self.codes) and (self.codes[self.position].isalpha() or self.codes[self.position].isdigit() or self.codes[self.position]=="_")):
                     cur_token = self.codes[self.position]
                     ident += cur_token
@@ -117,6 +130,7 @@ class lexer:
                     self.tokens.append(token(token_type.keyword,self.line,ident))
                 else:
                     if(ident in self.macro_definitions):
+                        # 在詞法分析階段直接展開巨集常數
                         if(self.macro_definitions[ident].startswith('-')):
                             self.tokens.append(token(token_type.operator,self.line,'-'))
                             self.tokens.append(token(token_type.number,self.line,self.macro_definitions[ident][1:]))
@@ -124,11 +138,11 @@ class lexer:
                             self.tokens.append(token(token_type.number,self.line,self.macro_definitions[ident]))
                     else:
                         self.tokens.append(token(token_type.identifier,self.line,ident))
-            #number or hexadecimal
+            # 十進位數字或十六進位數字
             elif(cur_token.isdigit()):
                 num=cur_token
                 self.position+=1
-                # Check for hexadecimal (0x prefix)
+                # 檢查是否為十六進位（0x 前綴）
                 if(cur_token == '0' and self.position < len(self.codes) and self.codes[self.position].lower() == 'x'):
                     cur_token = self.codes[self.position]
                     num += cur_token
@@ -141,20 +155,21 @@ class lexer:
                         self.position+=1
                     self.tokens.append(token(token_type.hexadecimal, self.line, num))
                 else:
-                    # Decimal number
+                    # 十進位數字
                     while (self.position < len(self.codes) and self.codes[self.position].isdigit()):
                         cur_token = self.codes[self.position]
                         num += cur_token
                         self.position+=1
                     self.tokens.append(token(token_type.number, self.line, num))
-            #string/character literal
+            # 字串/字元常值
             elif(cur_token == '"' or cur_token == "'"):
                 quote_type = cur_token
                 string = ""
                 self.position+=1
                 while(self.position < len(self.codes) and self.codes[self.position] != quote_type):
-                    #eacape sequence
+                    # 處理跳脫字元
                     if(self.codes[self.position]=='\\'):
+                        # 反斜線後必須仍有字元，否則代表字串未結束
                         if(self.position+1 >= len(self.codes)):
                             if(quote_type == '"'):
                                 raise Exception(f"Syntax error: Unterminated string literal at line {self.line}")
@@ -184,18 +199,18 @@ class lexer:
                         raise Exception(f"Syntax error: Unterminated string literal at line {self.line}")
                     else:
                         raise Exception(f"Syntax error: Unterminated character literal at line {self.line}")
-                self.position+=1#skip the closing quote
+                self.position+=1# 跳過結尾引號
                 if(quote_type == "'" and len(string) != 1):
                     raise Exception(f"Syntax error: Invalid character literal at line {self.line}: character literal must be a single character")
                 if(quote_type == '"'):
                     self.tokens.append(token(token_type.string, self.line, string))
                 else:
                     self.tokens.append(token(token_type.char, self.line, string))
-            # punctuator
+            # 分隔符號
             elif (cur_token in punctuator):
                 self.position+=1
                 self.tokens.append(token(token_type.punctuator, self.line, cur_token))
-            # unexpected character
+            # 非預期字元
             else:
                 raise Exception(f"Syntax error: Unexpected character: {cur_token}")
         return self.tokens
