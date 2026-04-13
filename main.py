@@ -1,10 +1,10 @@
 import lexer
-# import parser
+import parser
 import interpreter
 codes: list = []
-tokens: list[lexer.token] = []
-parser = []
 if __name__ == "__main__":
+    interpreter_instance = interpreter.interpreter()
+    trace_enabled = False
     while True:
             code = input("sc> ")
             #interactive command line
@@ -16,9 +16,7 @@ if __name__ == "__main__":
             try:
                 lexer_instance = lexer.lexer(code)
                 tokens = lexer_instance.tokenize()
-                del lexer_instance
-                for token in tokens:
-                    print(f"  {token.type}: {token.value}")
+                parser_instance = parser.parser(tokens)
             except Exception as e:#catch any exception and print it
                 print(e)
-            print("Tokens:")
+            # print("Tokens:")

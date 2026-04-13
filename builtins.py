@@ -1,6 +1,5 @@
 import math
 import random
-from memory import VirtualMemory
 
 
 # void puts(char* str);
@@ -105,7 +104,7 @@ def rand()-> int:
     return random.randint(0, 32767)
 
 #memory and tool functions
-def memoset(char_ptr: int, value: int, num: int)-> None:
+def memset(char_ptr: int, value: int, num: int)-> None:
     for i in range(num):
         vm.set_char(char_ptr + i, value)
 #int strlen(char* str);
