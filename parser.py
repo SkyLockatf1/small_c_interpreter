@@ -6,6 +6,7 @@ class Binary_expr:
         self.operator: lexer.token= operator
         self.right = right
     def eval(self):
+        pass
         
 class parser:
     def __init__(self, tokens):
