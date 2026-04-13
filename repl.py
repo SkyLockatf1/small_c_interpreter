@@ -13,7 +13,7 @@ def LIST(args = "", buffer = []):
                 print("["+str(i+1)+"]: "+buffer[i])
         else:     
             args = list(map(int,args.split("-")))
-            if args[0] < 1 or args[1] > len(buffer): pass #報錯
+            if args[0] < 1 or args[1] > len(buffer): raise RuntimeError(f"Runtime error: Index out of bounds. Valid range is 1 to {len(buffer)}")
 
             if len(args) == 1:
                 print("["+str(args[0])+"]: "+buffer[args[0]])
@@ -21,7 +21,7 @@ def LIST(args = "", buffer = []):
                 for i in range(args[0], args[1]):
                     print("["+str(i)+"]: "+buffer[i])
             else:
-                pass #error
+                raise RuntimeError(f"Runtime error: Too many arguments for LIST. Expected 0, 1, or 2, got {len(args)}")
 
 
 def INSERT(arg:str):
