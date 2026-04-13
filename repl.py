@@ -8,16 +8,20 @@ def LIST(args = "", buffer = []):
     if(len(buffer) == 0):
         print("buffer is empty")
     else:
-        args = list(map(args.split("-"),int))
-        if args[0] < 1 or args[1] > len(buffer): pass #報錯
+        if args == "":
+            for i in range(len(buffer)):
+                print("["+str(i+1)+"]: "+buffer[i])
+        else:     
+            args = list(map(int,args.split("-")))
+            if args[0] < 1 or args[1] > len(buffer): pass #報錯
 
-        if len(args) == 1:
-            print("["+args[0]+"]: "+buffer[args[0]])
-        elif len(args) == 2:
-            for i in range(args[0], args[1]):
-                print("["+i+"]: "+buffer[i])
-        else:
-            pass #error
+            if len(args) == 1:
+                print("["+str(args[0])+"]: "+buffer[args[0]])
+            elif len(args) == 2:
+                for i in range(args[0], args[1]):
+                    print("["+str(i)+"]: "+buffer[i])
+            else:
+                pass #error
 
 
 def INSERT(arg:str):
@@ -30,3 +34,4 @@ def DELETE(args:list[str]):
     else:
         pass
     pass
+
