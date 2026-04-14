@@ -26,8 +26,7 @@ def handle_list(args, codes):
         n = [n1, n2]
     else:
         # 只要不是以上兩種格式，就報錯（包含 1,5 或 1 5）
-        print(f"Runtime error: Invalid format '{args}'. Use 'n' or 'n1-n2'.")
-        return
+        raise Exception(f"Runtime error: Invalid format '{args}'. Use 'n' or 'n1-n2'.")
     repl.LIST(n, codes)
 
 if __name__ == "__main__":
@@ -62,4 +61,4 @@ if __name__ == "__main__":
                 # ... 
                 
         except Exception as e:
-            print(f"Error: {e}")    
+            print(e)

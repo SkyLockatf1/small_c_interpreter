@@ -16,15 +16,15 @@ def LIST(args = [], buffer = []):
                 
         elif len(args) == 1:
             if args[0] < 1 or args[0] > len(buffer):
-                raise RuntimeError(f"Runtime error: Index {args[0]} out of bounds.")
+                raise Exception(f"Runtime error: Index {args[0]} out of bounds.")
             print("["+str(args[0])+"]: "+buffer[args[0]-1])
 
         elif len(args) == 2:
-            if args[0] < 1 or args[1] > len(buffer): raise RuntimeError(f"Runtime error: Index out of bounds. Valid range is 1 to {len(buffer)}")
+            if args[0] < 1 or args[1] > len(buffer): raise Exception(f"Runtime error: Index out of bounds. Valid range is 1 to {len(buffer)}")
             for i in range(args[0], args[1]+1):
                 print("["+str(i)+"]: "+buffer[i-1])
         else:
-            raise RuntimeError(f"Runtime error: Too many arguments for LIST. Expected 0, 1, or 2, got {len(args)}")
+            raise Exception(f"Runtime error: Too many arguments for LIST. Expected 0, 1, or 2, got {len(args)}")
 
 
 def INSERT(arg:str):
