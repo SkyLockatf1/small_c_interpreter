@@ -13,16 +13,16 @@ def LIST(args = [], buffer = []):
         if len(args) == 0:
             for i in range(len(buffer)):
                 print("["+str(i+1)+"]: "+buffer[i])
-                return
+                
         elif len(args) == 1:
             if args[0] < 1 or args[0] > len(buffer):
                 raise RuntimeError(f"Runtime error: Index {args[0]} out of bounds.")
-            print("["+str(args[0])+"]: "+buffer[args[0]])
+            print("["+str(args[0])+"]: "+buffer[args[0]-1])
 
         elif len(args) == 2:
             if args[0] < 1 or args[1] > len(buffer): raise RuntimeError(f"Runtime error: Index out of bounds. Valid range is 1 to {len(buffer)}")
-            for i in range(args[0], args[1]):
-                print("["+str(i)+"]: "+buffer[i])
+            for i in range(args[0], args[1]+1):
+                print("["+str(i)+"]: "+buffer[i-1])
         else:
             raise RuntimeError(f"Runtime error: Too many arguments for LIST. Expected 0, 1, or 2, got {len(args)}")
 
@@ -38,4 +38,4 @@ def DELETE(args:list[str]):
         pass
     pass
 
-LIST("123,123",["hello","world","test","example"])
+# LIST("123,123",["hello","world","test","example"])
