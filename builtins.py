@@ -2,9 +2,8 @@ import math
 import random
 from memory import VirtualMemory
 
-vm = VirtualMemory()
-
 # void puts(char* str);
+
 def puts(char_ptr: str)-> None:
     print(char_ptr)
 
@@ -105,11 +104,11 @@ def rand()-> int:
     return random.randint(0, 32767)
 
 #memory and tool functions
-def memoset(char_ptr: int, value: int, num: int)-> None:
+def memset(vm: VirtualMemory,char_ptr: int, value: int, num: int)-> None:
     for i in range(num):
         vm.set_char(char_ptr + i, value)
 #int strlen(char* str);
-def strlen(str_addr: int)-> int:
+def strlen(vm: VirtualMemory,str_addr: int)-> int:
     length = 0
     while vm.get_char(str_addr + length) != 0:
         length += 1
@@ -125,7 +124,7 @@ def atio(char_str: str)-> int:
     return int(char_str)
 
 #void strcpy(char *dest, char *src);
-def strcpy(dest_addr: int, src_addr: int)-> None:
+def strcpy(vm: VirtualMemory, dest_addr: int, src_addr: int)-> None:
 
     i = 0
     while True:
@@ -139,7 +138,7 @@ def strcpy(dest_addr: int, src_addr: int)-> None:
         i += 1
 
 #int strcmp(char *s1, char *s2)
-def strcmp(s1_addr: int, s2_addr: int)-> int:
+def strcmp(vm: VirtualMemory, s1_addr: int, s2_addr: int)-> int:
     vm.check_bounds(s1_addr, s1_addr + 1, 1)
     i = 0
     while True:

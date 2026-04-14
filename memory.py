@@ -76,7 +76,7 @@ class VirtualMemory:
     
     def free_stack(self, size):
         # 函式結束 回收記憶體
-        self.stack_ptr += size
+        self.stack_top += size
 
 
 
