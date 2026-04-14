@@ -46,11 +46,14 @@ if __name__ == "__main__":
             # 1. 處理環境指令
             if cmd == "EXIT" or cmd == "QUIT":
                 break
+            elif cmd == "CLEAR":
+                repl.CLEAR()
             elif cmd == "LIST":
                 handle_list(args, codes)
             elif cmd == "APPEND":
                 # 進入多行輸入模式 (你之後要實作的部分)
                 pass
+            
             
             # 2. 如果不是環境指令，才視為 Small-C 程式碼執行
             else:

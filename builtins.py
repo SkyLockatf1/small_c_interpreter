@@ -98,7 +98,7 @@ def mod(a:int, b:int)-> int:
     return a % b
 
 def srand(seed:int)-> None:
-    random.seed(seed)
+    random.seed(seed) #處理種子傳遞問題
 
 def rand()-> int:
     return random.randint(0, 32767)
