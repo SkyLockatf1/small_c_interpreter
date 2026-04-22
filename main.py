@@ -8,7 +8,7 @@ import repl
 RE_SINGLE = r'^(\d+)$'
 RE_RANGE = r'^(\d+)-(\d+)$'
 
-def handle_list(args, codes):
+def handle_list(buffer: list, args: str):
 
     # 使用 fullmatch 進行嚴格檢查
     m_single = re.fullmatch(RE_SINGLE, args)
@@ -26,11 +26,11 @@ def handle_list(args, codes):
         n = [n1, n2]
     else:
         # 只要不是以上兩種格式，就報錯（包含 1,5 或 1 5）
-        raise Exception(f"Runtime error: Invalid format '{args}'. Use 'n' or 'n1-n2'.")
-    repl.LIST(n, codes)
-
+        raise Exception(f"Runtime error: Invalid format '{args}'. Use 'n' or 'n1-n2' or without arguments.")
+    repl.LIST(buffer, n)
+    
 if __name__ == "__main__":
-    codes = []  # 原本的 program buffer
+    buffer = []  # 原本的 program buffer
     # ... 初始化你的實例 ...
 
     while True:
@@ -48,16 +48,38 @@ if __name__ == "__main__":
                 break
             elif cmd == "CLEAR":
                 repl.CLEAR()
+            elif cmd == "ABOUT":
+                repl.ABOUT()
+            elif cmd == "HELP":
+                repl.HELP()
             elif cmd == "LIST":
-                handle_list(args, codes)
+                handle_list(buffer, args)
+            elif cmd == "EDIT":
+                m_single = re.fullmatch(RE_SINGLE, args)
+                if m_single:
+                    n = int(m_single.group(1))
+                    repl.EDIT(buffer, n)
+                else:
+                    raise Exception(f"Runtime error: Invalid format '{args}'. Use 'n'.")
             elif cmd == "APPEND":
-                # 進入多行輸入模式 (你之後要實作的部分)
+                repl.APPEND(buffer)
+            elif cmd == "RUN":
+                pass
+            elif cmd == "NEW":
+                pass
+            elif cmd == "LOAD":
+                pass
+            elif cmd == "SAVE":
+                pass
+            elif cmd == "TRACE":
+                pass
+            elif cmd == "VARS":
                 pass
             
             
             # 2. 如果不是環境指令，才視為 Small-C 程式碼執行
             else:
-                codes.append(raw_input) # 只有程式碼才存進 buffer (依規範而定)
+                buffer.append(raw_input) # 只有程式碼才存進 buffer (依規範而定)
                 # 執行 Lexer, Parser...
                 lexer_instance = lexer.lexer(raw_input)
                 tokens = lexer_instance.tokenize()
