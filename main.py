@@ -32,7 +32,7 @@ def handle_list(buffer: list, args: str):
 if __name__ == "__main__":
     buffer = []  # 原本的 program buffer
     # ... 初始化你的實例 ...
-
+    interpreter_instance = interpreter.Interpreter()
     while True:
         try:
             raw_input = input("sc> ").strip()
@@ -83,7 +83,11 @@ if __name__ == "__main__":
                 # 執行 Lexer, Parser...
                 lexer_instance = lexer.lexer(raw_input)
                 tokens = lexer_instance.tokenize()
-                # ... 
-                
+                parser_instance = parser.parser(tokens)
+                ast = parser_instance.parse()
+                print("AST:", ast)
+                result = interpreter_instance.evaluate(ast)
+                print("Result:", result)
+
         except Exception as e:
             print(e)
