@@ -66,6 +66,8 @@ if __name__ == "__main__":
             elif cmd == "RUN":
                 pass
             elif cmd == "NEW":
+                buffer.clear()
+                interpreter_instance = interpreter.Interpreter()
                 pass
             elif cmd == "LOAD":
                 pass
@@ -87,7 +89,7 @@ if __name__ == "__main__":
                 ast = parser_instance.parse()
                 print("AST:", ast)
                 result = interpreter_instance.evaluate(ast)
-                print("Result:", result)
+                # print("Result:", result)
 
         except Exception as e:
             print(e)

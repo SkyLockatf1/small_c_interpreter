@@ -9,12 +9,13 @@ def puts(char_ptr: str)-> None:
 
 # void printf(char* fmt, ...);
 def printf(format_str, *args)-> None:
-    # 簡化版 printf，會檢查格式碼與參數型別是否一致。
+    # 簡化版 printf：支援 %%、%d、%s、%c、%x，並檢查參數數量與型別。
     result = ""
-    arg_index = 0
-    i = 0
+    arg_index = 0  # 目前要使用的可變參數位置。
+    i = 0          # 目前正在解析的格式字串位置。
     while i < len(format_str):
         if format_str[i] == '%' and i + 1 < len(format_str):
+            # 遇到 % 時，讀取下一個字元判斷格式指定字。
             specifier = format_str[i + 1]
             if specifier == '%':
                 result += '%'
@@ -22,16 +23,23 @@ def printf(format_str, *args)-> None:
             elif specifier == 'd':
                 if arg_index >= len(args):
                     raise Exception("Runtime error: printf argument missing")
-                if type(args[arg_index]) is not int:
-                    raise Exception(f"Runtime error: printf expects int for %d, got {type(args[arg_index]).__name__}")
-                result += str(args[arg_index])
+                if type(args[arg_index]) is int:
+                    result += str(args[arg_index])
+                elif type(args[arg_index]) is str and len(args[arg_index]) == 1: # 允許 char 以 int 形式輸出
+                    # char 在此直譯器中可能以長度為 1 的字串表示。
+                    result += str(ord(args[arg_index]))
+                else:
+                    if(type(args[arg_index]).__name__=='str'):
+                        raise Exception("Runtime error: printf expects int or hex for %d, got char*")
+                    else:
+                        raise Exception(f"Runtime error: printf expects int or hex for %d, got {type(args[arg_index]).__name__}")
                 arg_index += 1
                 i += 2
             elif specifier == 's':
                 if arg_index >= len(args):
                     raise Exception("Runtime error: printf argument missing")
                 if type(args[arg_index]) is not str:
-                    raise Exception(f"Runtime error: printf expects str for %s, got {type(args[arg_index]).__name__}")
+                    raise Exception(f"Runtime error: printf expects char* for %s, got {type(args[arg_index]).__name__}")
                 result += args[arg_index]
                 arg_index += 1
                 i += 2
@@ -44,24 +52,32 @@ def printf(format_str, *args)-> None:
                 elif type(value) is str and len(value) == 1:
                     result += value
                 else:
-                    raise Exception(f"Runtime error: printf expects char for %c, got {type(value).__name__}")
+                    if(type(args[arg_index]).__name__=='str'):
+                        raise Exception("Runtime error: printf expects char for %d, got char*")
+                    else:
+                        raise Exception(f"Runtime error: printf expects char for %c, got {type(value).__name__}")
                 arg_index += 1
                 i += 2
             elif specifier == 'x':
                 if arg_index >= len(args):
                     raise Exception("Runtime error: printf argument missing")
                 if type(args[arg_index]) is not int:
-                    raise Exception(f"Runtime error: printf expects int for %x, got {type(args[arg_index]).__name__}")
-                result += format(args[arg_index], 'x')
+                    if(type(args[arg_index]).__name__=='str'):
+                        raise Exception("Runtime error: printf expects char for %d, got char*")
+                    else:
+                        raise Exception(f"Runtime error: printf expects int or hex for %x, got {type(args[arg_index]).__name__}")
+                result += hex(args[arg_index]) # hex() 會回傳字串
                 arg_index += 1
                 i += 2
             else:
+                # 不支援的格式指定字照原字元輸出。
                 result += format_str[i]
                 i += 1
         else:
             result += format_str[i]
             i += 1
     if arg_index != len(args):
+        # 格式字串解析完後仍有多餘參數，代表呼叫格式錯誤。
         raise Exception("Runtime error: printf argument count mismatch")
     print(result, end='')
 

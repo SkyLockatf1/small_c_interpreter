@@ -181,10 +181,12 @@ class parser:
         return None
 
     def parse(self):
-        """解析一個完整運算式；允許結尾有一個分號。"""
+        """解析一個完整運算式；函式呼叫必須以分號結尾。"""
         expr = self.parse_expression()
-        # REPL 或語句環境常會在 expression 後面接分號，這裡先允許單一分號存在。
-        self.match(";", lexer.token_type.punctuator)
+        if isinstance(expr, CallExpr):
+            self.expect(";", lexer.token_type.punctuator)
+        elif isinstance(expr, AssignmentExpr):
+            self.expect(";", lexer.token_type.punctuator)
         if not self.is_at_end():
             self.error("Unexpected token")
         return expr
