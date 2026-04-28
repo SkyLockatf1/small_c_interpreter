@@ -76,7 +76,20 @@ if __name__ == "__main__":
             elif cmd == "TRACE":
                 pass
             elif cmd == "VARS":
-                pass
+                table = interpreter_instance.symtable.table
+                if not table:
+                    print("No variables defined.")
+                else:
+                    for name, info in table.items():
+                        var_type = info['type']
+                        addr = info['addr']
+                        if var_type == 'int':
+                            val = interpreter_instance.memory.get_int(addr)
+                            print(f"int {name} = {val}")
+                        elif var_type == 'char':
+                            val = interpreter_instance.memory.get_char(addr)
+                            # 仿照範例輸出： char ch = 65 ('A')
+                            print(f"char {name} = {val} ('{chr(val)}')")
             
             
             # 2. 如果不是環境指令，才視為 Small-C 程式碼執行

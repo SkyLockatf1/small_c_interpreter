@@ -181,12 +181,35 @@ class parser:
         return None
 
     def parse(self):
-        """解析一個完整運算式；函式呼叫必須以分號結尾。"""
+        """解析一個完整語句（可能是變數宣告或運算式）"""
+        token = self.current_token
+        
+        # 如果開頭是 int 或 char，進入變數宣告邏輯
+        if token is not None and token.type == lexer.token_type.keyword and token.value in ["int", "char"]:
+            var_type = token.value
+            line = token.line
+            self.advance() # 吃掉型別關鍵字
+            
+            # 檢查並取得變數名稱
+            name_token = self.current_token
+            if name_token is None or name_token.type != lexer.token_type.identifier:
+                self.error("Expected variable name")
+            name = name_token.value
+            self.advance() # 吃掉變數名稱
+            
+            # 檢查是否有給予初始值
+            init_expr = None
+            if self.match("=", lexer.token_type.operator):
+                init_expr = self.parse_expression()
+                
+            self.expect(";", lexer.token_type.punctuator)
+            return VarDecl(var_type, name, init_expr, line)
+
+        # 若不是宣告，就走原本的運算式邏輯
         expr = self.parse_expression()
-        if isinstance(expr, CallExpr):
+        if isinstance(expr, CallExpr) or isinstance(expr, AssignmentExpr):
             self.expect(";", lexer.token_type.punctuator)
-        elif isinstance(expr, AssignmentExpr):
-            self.expect(";", lexer.token_type.punctuator)
+            
         if not self.is_at_end():
             self.error("Unexpected token")
         return expr
@@ -325,3 +348,16 @@ class parser:
             return expr
 
         self.error("Expected expression", token)
+
+class VarDecl:
+    """變數宣告 AST 節點，例如 int x = 10; 或 int z;"""
+    def __init__(self, var_type: str, name: str, init_expr, line: int):
+        self.var_type = var_type   # "int" 或 "char"
+        self.name = name           # 變數名稱
+        self.init_expr = init_expr # 初始值運算式 (若無則為 None)
+        self.line = line
+
+    def __repr__(self):
+        return f"VarDecl({self.var_type}, {self.name}, {self.init_expr})"
+    
+    

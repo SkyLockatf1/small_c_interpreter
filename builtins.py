@@ -4,12 +4,33 @@ from memory import VirtualMemory
 
 # void puts(char* str);
 
-def puts(char_ptr: str)-> None:
-    print(char_ptr)
+def puts(vm : VirtualMemory, char_ptr: int)-> None:
+    # 從 char_ptr 地址開始，逐字讀取直到遇到 \0
+    vm.check_bounds(char_ptr, char_ptr + 1, 1) # 確保 char_ptr 是有效地址
+    offset = 0
+    result = ""
+    while True:
+        c = vm.get_char(char_ptr + offset)
+        if c == 0:
+            break
+        result += chr(c)
+        offset += 1
+    
+    # 印出字串並自動換行 (Python print 預設就會換行)
+    print(result)
 
 # void printf(char* fmt, ...);
-def printf(format_str, *args)-> None:
+def printf(vm: VirtualMemory, format_addr: int, *args) -> None:
     # 簡化版 printf：支援 %%、%d、%s、%c、%x，並檢查參數數量與型別。
+    format_str = ""
+    offset = 0
+    while True:
+        vm.check_bounds(format_addr, format_addr + offset, 1)
+        c = vm.get_char(format_addr + offset)
+        if c == 0:
+            break
+        format_str += chr(c)
+        offset += 1
     result = ""
     arg_index = 0  # 目前要使用的可變參數位置。
     i = 0          # 目前正在解析的格式字串位置。
@@ -66,7 +87,7 @@ def printf(format_str, *args)-> None:
                         raise Exception("Runtime error: printf expects char for %d, got char*")
                     else:
                         raise Exception(f"Runtime error: printf expects int or hex for %x, got {type(args[arg_index]).__name__}")
-                result += hex(args[arg_index]) # hex() 會回傳字串
+                result += format(args[arg_index], 'x') # format () 會回傳字串
                 arg_index += 1
                 i += 2
             else:
