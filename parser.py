@@ -107,7 +107,16 @@ class IndexExpr:
     def __repr__(self):
         return f"IndexExpr({self.base}, {self.index})"
 
+class VarDecl:
+    """變數宣告 AST 節點，例如 int x = 10; 或 int z;"""
+    def __init__(self, var_type: str, name: str, init_expr, line: int):
+        self.var_type = var_type   # "int" 或 "char"
+        self.name = name           # 變數名稱
+        self.init_expr = init_expr # 初始值運算式 (若無則為 None)
+        self.line = line
 
+    def __repr__(self):
+        return f"VarDecl({self.var_type}, {self.name}, {self.init_expr})"
 # class TypeSpec:
 #     """型別描述 AST 節點，例如 int、char*、void。"""
 
@@ -125,6 +134,7 @@ class parser:
         # position 指向 current_token 在 tokens 中的位置；讀完時 current_token 會是 None。
         self.position: int = 0
         self.current_token: lexer.token = self.peek()
+        self.statements = []  # 用來存放多行程式碼的 AST，讓 REPL 可以一次執行整段程式碼
 
     def peek(self, offset=0):
         """查看目前 token 或往後 offset 個位置的 token，但不改變 parser 狀態。"""
@@ -180,39 +190,39 @@ class parser:
             return self.advance()
         return None
 
-    def parse(self):
-        """解析一個完整語句（可能是變數宣告或運算式）"""
+    def parse_statement(self):
+        """解析單一語句（變數宣告或運算式語句），回傳對應 AST 節點。"""
         token = self.current_token
-        
-        # 如果開頭是 int 或 char，進入變數宣告邏輯
+
         if token is not None and token.type == lexer.token_type.keyword and token.value in ["int", "char"]:
             var_type = token.value
             line = token.line
-            self.advance() # 吃掉型別關鍵字
-            
-            # 檢查並取得變數名稱
+            self.advance()
+
             name_token = self.current_token
             if name_token is None or name_token.type != lexer.token_type.identifier:
                 self.error("Expected variable name")
             name = name_token.value
-            self.advance() # 吃掉變數名稱
-            
-            # 檢查是否有給予初始值
+            self.advance()
+
             init_expr = None
             if self.match("=", lexer.token_type.operator):
                 init_expr = self.parse_expression()
-                
+
             self.expect(";", lexer.token_type.punctuator)
             return VarDecl(var_type, name, init_expr, line)
 
-        # 若不是宣告，就走原本的運算式邏輯
         expr = self.parse_expression()
-        if isinstance(expr, CallExpr) or isinstance(expr, AssignmentExpr):
+        if isinstance(expr, (CallExpr, AssignmentExpr)):
             self.expect(";", lexer.token_type.punctuator)
-            
-        if not self.is_at_end():
-            self.error("Unexpected token")
         return expr
+
+    def parse(self):
+        """解析所有語句，每個語句的 AST 依序存入 self.statements 並回傳該 list。"""
+        while not self.is_at_end():
+            stmt = self.parse_statement()
+            self.statements.append(stmt)
+        return self.statements
 
     def parse_expression(self):
         """運算式入口，目前最低層級是指定運算。"""
@@ -348,16 +358,5 @@ class parser:
             return expr
 
         self.error("Expected expression", token)
-
-class VarDecl:
-    """變數宣告 AST 節點，例如 int x = 10; 或 int z;"""
-    def __init__(self, var_type: str, name: str, init_expr, line: int):
-        self.var_type = var_type   # "int" 或 "char"
-        self.name = name           # 變數名稱
-        self.init_expr = init_expr # 初始值運算式 (若無則為 None)
-        self.line = line
-
-    def __repr__(self):
-        return f"VarDecl({self.var_type}, {self.name}, {self.init_expr})"
     
     

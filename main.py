@@ -99,9 +99,10 @@ if __name__ == "__main__":
                 lexer_instance = lexer.lexer(raw_input)
                 tokens = lexer_instance.tokenize()
                 parser_instance = parser.parser(tokens)
-                ast = parser_instance.parse()
-                print("AST:", ast)
-                result = interpreter_instance.evaluate(ast)
+                statements = parser_instance.parse()
+                for ast in statements:
+                    print("AST:", ast)
+                    result = interpreter_instance.evaluate(ast)
                 # print("Result:", result)
 
         except Exception as e:

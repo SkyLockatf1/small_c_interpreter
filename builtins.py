@@ -6,10 +6,10 @@ from memory import VirtualMemory
 
 def puts(vm : VirtualMemory, char_ptr: int)-> None:
     # 從 char_ptr 地址開始，逐字讀取直到遇到 \0
-    vm.check_bounds(char_ptr, char_ptr + 1, 1) # 確保 char_ptr 是有效地址
     offset = 0
     result = ""
     while True:
+        vm.check_bounds(char_ptr, char_ptr + 1, 1) # 確保 char_ptr 是有效地址
         c = vm.get_char(char_ptr + offset)
         if c == 0:
             break
