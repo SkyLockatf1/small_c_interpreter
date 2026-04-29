@@ -55,6 +55,59 @@ class VirtualMemory:
         return val
     
 
+    # ======int* (int pointer)======
+    def set_int_ptr(self, addr, ptr_value):
+        # 給地址存儲指向 int 的指針 (指針本身是一個地址值)
+        if addr + 4 > self.size:
+            raise RuntimeError("Memory Access Violation: Out of bounds")
+        
+        # 指針值是地址，以無符號方式存儲
+        if not isinstance(ptr_value, int):
+            raise RuntimeError(f"Runtime error: Invalid pointer value type")
+        
+        if ptr_value < 0:
+            raise RuntimeError(f"Runtime error: Pointer value cannot be negative")
+        
+        # 使用無符號 4 bytes 存儲指針
+        bytes_val = ptr_value.to_bytes(4, 'little', signed=False)
+        self.mem[addr:addr+4] = bytes_val
+    
+    def get_int_ptr(self, addr):
+        # 從給定地址讀取指向 int 的指針
+        if addr + 4 > self.size:
+            raise RuntimeError("Memory Access Violation: Out of bounds")
+        
+        bytes_val = self.mem[addr:addr+4]
+        # 指針是無符號地址值
+        return int.from_bytes(bytes_val, 'little', signed=False)
+
+
+    # ======char* (char pointer)======
+    def set_char_ptr(self, addr, ptr_value):
+        # 給地址存儲指向 char 的指針 (指針本身是一個地址值)
+        if addr + 4 > self.size:
+            raise RuntimeError("Memory Access Violation: Out of bounds")
+        
+        # 指針值是地址，以無符號方式存儲
+        if not isinstance(ptr_value, int):
+            raise RuntimeError(f"Runtime error: Invalid pointer value type")
+        
+        if ptr_value < 0:
+            raise RuntimeError(f"Runtime error: Pointer value cannot be negative")
+        
+        # 使用無符號 4 bytes 存儲指針
+        bytes_val = ptr_value.to_bytes(4, 'little', signed=False)
+        self.mem[addr:addr+4] = bytes_val
+    
+    def get_char_ptr(self, addr):
+        # 從給定地址讀取指向 char 的指針
+        if addr + 4 > self.size:
+            raise RuntimeError("Memory Access Violation: Out of bounds")
+        
+        bytes_val = self.mem[addr:addr+4]
+        # 指針是無符號地址值
+        return int.from_bytes(bytes_val, 'little', signed=False)
+
 
     def alloc_global(self, size):
         #分配全域空間
