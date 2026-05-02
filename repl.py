@@ -31,12 +31,12 @@ def HELP(cmd:str):
     pass
 
 # 進入多行追加模式，輸入單獨 "." 結束
-def APPEND(codes:list[str]):
+def APPEND(buffer:list[str]):
     while True:
         new_code = input("Enter code to append (or '.' to finish): ").strip()
         if new_code == ".": # 空行結束輸入
             break
-        codes.append(new_code)
+        buffer.append(new_code)
 
 # 依作業系統執行對應的清屏指令
 def CLEAR():
