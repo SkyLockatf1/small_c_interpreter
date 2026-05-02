@@ -124,6 +124,21 @@ class VarDecl:
 #         self.base_type = base_type
 #         self.pointer_level = pointer_level
 
+class Block:
+    """區塊 AST 節點，代表由 { } 包起來的多個語句。"""
+    def __init__(self, statements: list):
+        self.statements = statements
+    def __repr__(self):
+        return f"Block({self.statements})"
+
+class IfStmt:
+    """If 條件分支 AST 節點。"""
+    def __init__(self, condition, then_branch, else_branch=None):
+        self.condition = condition
+        self.then_branch = then_branch
+        self.else_branch = else_branch  # 若無 else 則為 None
+    def __repr__(self):
+        return f"IfStmt({self.condition}, {self.then_branch}, {self.else_branch})"
 
 class parser:
     """遞迴下降語法分析器，依照運算子優先權把 token 串轉成 AST。"""
@@ -358,5 +373,38 @@ class parser:
             return expr
 
         self.error("Expected expression", token)
-    
+    def parse_block(self):
+        """解析大括號區塊 { ... }"""
+        self.advance() # 吃掉 '{'
+        statements = []
+        # 一直解析語句，直到遇到 '}' 或檔案結束
+        while not self.check("}", lexer.token_type.punctuator) and not self.is_at_end():
+            statements.append(self.parse()) # 遞迴呼叫你之前寫好的 parse()
+            
+        self.expect("}", lexer.token_type.punctuator)
+        return Block(statements)
+
+    def parse_if_statement(self):
+        """解析 if (cond) { ... } else { ... }"""
+        self.advance() # 吃掉 'if'
+        self.expect("(", lexer.token_type.punctuator)
+        condition = self.parse_expression()
+        self.expect(")", lexer.token_type.punctuator)
+        
+        # 解析 if 成立時要執行的語句 (通常是 parse_block，但也支援單行不加括號)
+        then_branch = self.parse_statement_or_block()
+        
+        else_branch = None
+        # 如果有 else，繼續解析
+        if self.match("else", lexer.token_type.keyword):
+            else_branch = self.parse_statement_or_block()
+            
+        return IfStmt(condition, then_branch, else_branch)
+
+    def parse_statement_or_block(self):
+        """輔助函式：判斷接下來是 { 區塊，還是單行語句"""
+        if self.check("{", lexer.token_type.punctuator):
+            return self.parse_block()
+        else:
+            return self.parse()
     
