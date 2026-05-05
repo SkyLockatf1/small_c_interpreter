@@ -206,19 +206,31 @@ class parser:
         return None
 
     def parse_statement(self):
-        """解析單一語句（變數宣告或運算式語句），回傳對應 AST 節點。"""
+        """解析單一語句（If、區塊、變數宣告或運算式語句），回傳對應 AST 節點。"""
         token = self.current_token
+        
+        if token is None:
+            return None
 
-        if token is not None and token.type == lexer.token_type.keyword and token.value in ["int", "char"]:
+        # 1. 處理 If 敘述
+        if token.type == lexer.token_type.keyword and token.value == "if":
+            return self.parse_if_statement()
+
+        # 2. 處理獨立的區塊 { ... }
+        if token.type == lexer.token_type.punctuator and token.value == "{":
+            return self.parse_block()
+
+        # 3. 處理變數宣告 (int, char)
+        if token.type == lexer.token_type.keyword and token.value in ["int", "char"]:
             var_type = token.value
             line = token.line
-            self.advance()
+            self.advance() # 吃掉型別關鍵字
 
             name_token = self.current_token
             if name_token is None or name_token.type != lexer.token_type.identifier:
                 self.error("Expected variable name")
             name = name_token.value
-            self.advance()
+            self.advance() # 吃掉變數名稱
 
             init_expr = None
             if self.match("=", lexer.token_type.operator):
@@ -227,9 +239,12 @@ class parser:
             self.expect(";", lexer.token_type.punctuator)
             return VarDecl(var_type, name, init_expr, line)
 
+        # 4. 若都不是以上情況，則視為運算式語句 (Expression Statement)
         expr = self.parse_expression()
-        if isinstance(expr, (CallExpr, AssignmentExpr)):
-            self.expect(";", lexer.token_type.punctuator)
+        
+        # C 語言中，除了特定的控制結構外，運算式語句結尾通常需要分號。
+        # (例如函數呼叫 f(); 或賦值 x = 1;)
+        self.expect(";", lexer.token_type.punctuator)
         return expr
 
     def parse(self):
