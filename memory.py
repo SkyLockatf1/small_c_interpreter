@@ -84,21 +84,9 @@ class VirtualMemory:
 
     def set_string(self, string_content): # char array
         """
-        處理字串常數：
-        1. 處理跳脫字元 (如 \n, \t) 
-        2. 分配空間並寫入 mem
-        3. 自動附加 \0 
-        4. 回傳字串在記憶體中的起始位址
+        分配空間並寫入字串常數（lexer 已處理跳脫字元），自動附加 \0，回傳起始位址。
         """
-        def _process_escape_sequences(s):
-            # 轉換跳脫字符成ascii
-            s = s.replace('\\n', '\n').replace('\\t', '\t').replace('\\0', '\0')
-            s = s.replace('\\\\', '\\').replace("\\'", "'").replace('\\"', '"')
-            return s.encode('ascii')
-        
-
-        # 處理跳脫字符
-        processed_bytes = _process_escape_sequences(string_content)
+        processed_bytes = string_content.encode('ascii')
         
 
         start_addr = self.global_top

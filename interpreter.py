@@ -59,6 +59,11 @@ class Interpreter:
                 if not isinstance(val, (int)):
                     raise Exception(f"Runtime error: Cannot apply unary '~' to {type_mapping[type(val).__name__]} at line {ast_node.line}.")
                 return ~val
+            elif ast_node.operator == "&":
+                if not isinstance(ast_node.operand, parser.Identifier):
+                    raise Exception(f"Runtime error: Cannot apply unary '&' to non-variable at line {ast_node.line}.")
+                else:
+                    pass
             elif ast_node.operator == "++" and ast_node.postfix == False:
                 # 目前只處理前置 ++ 的回傳值，尚未把結果寫回變數本身。
                 if not isinstance(val, (int)):
@@ -72,8 +77,28 @@ class Interpreter:
                 
                 
         elif isinstance(ast_node, parser.BinaryExpr):
-            # 二元運算會先求左右子表達式，再依照運算子檢查型別並產生結果。
+            # 二元運算採延遲求值：先求左子表達式，
+            # 對於 && / || 採短路（必要時才求右子表達式），其餘運算再求右子表達式。
             left_val = self.evaluate(ast_node.left)
+            if ast_node.operator == "&&":
+                if not isinstance(left_val, (int)):
+                    raise Exception(f"Runtime error: Cannot apply operator '&&' to {type_mapping[type(left_val).__name__]} and <right> at line {ast_node.line}.")
+                if not left_val:
+                    return 0
+                right_val = self.evaluate(ast_node.right)
+                if not isinstance(right_val, (int)):
+                    raise Exception(f"Runtime error: Cannot apply operator '&&' to {type_mapping[type(left_val).__name__]} and {type_mapping[type(right_val).__name__]} at line {ast_node.line}.")
+                return 1 if left_val and right_val else 0
+            elif ast_node.operator == "||":
+                if not isinstance(left_val, (int)):
+                    raise Exception(f"Runtime error: Cannot apply operator '||' to {type_mapping[type(left_val).__name__]} and <right> at line {ast_node.line}.")
+                if left_val:
+                    return 1
+                right_val = self.evaluate(ast_node.right)
+                if not isinstance(right_val, (int)):
+                    raise Exception(f"Runtime error: Cannot apply operator '||' to {type_mapping[type(left_val).__name__]} and {type_mapping[type(right_val).__name__]} at line {ast_node.line}.")
+                return 1 if left_val or right_val else 0
+            # 非短路運算再求右子表達式
             right_val = self.evaluate(ast_node.right)
             if ast_node.operator == "+":
                 if not isinstance(left_val, (int)) or not isinstance(right_val, (int)):
