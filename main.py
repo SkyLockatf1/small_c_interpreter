@@ -60,7 +60,7 @@ if __name__ == "__main__":
                     n = int(m_single.group(1))
                     repl.EDIT(buffer, n)
                 else:
-                    raise Exception(f"Runtime error: Invalid format '{args}'. Use 'n'.")
+                    raise Exception(f"Runtime error: Invalid format '{args}'. Use 'n' for editing a specific line.")
             elif cmd == "APPEND":
                 repl.APPEND(buffer)
             elif cmd == "RUN":

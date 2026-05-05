@@ -36,7 +36,7 @@ class lexer:
         while self.position < len(self.codes):
             cur_token = self.codes[self.position]
             # 跳過空白、換行與 tab
-            if (cur_token.isspace() or cur_token == '\n' or cur_token == '\t'):
+            if (cur_token.isspace()):# 包含空白、換行、tab 等所有 Unicode 空白字元
                 if cur_token == '\n':
                     self.line += 1
                 self.position+=1
@@ -67,7 +67,7 @@ class lexer:
                     macro_type += self.codes[self.position]
                     self.position+=1
                 if(self.position >= len(self.codes) or self.codes[self.position] == '\n'):
-                    raise Exception(f"Syntax error: Invalid preprocessor directive at line {self.line}: missing macro type")
+                    raise Exception(f"Syntax error: Invalid preprocessor directive at line {self.line}: missing macro name and value")
                 elif(macro_type != '#define'):
                     raise Exception(f"Syntax error: Unsupported preprocessor directive: {macro_type} at line {self.line}")
                 else:
@@ -153,6 +153,9 @@ class lexer:
                         cur_token = self.codes[self.position]
                         num += cur_token
                         self.position+=1
+                    # 十六進位常數結束後，若直接接字母或底線，視為非法後綴。
+                    if(self.position < len(self.codes) and (self.codes[self.position].isalpha() or self.codes[self.position] == '_')):
+                        raise Exception(f"Syntax error: Invalid suffix on hexadecimal constant at line {self.line}")
                     self.tokens.append(token(token_type.hexadecimal, self.line, num))
                 else:
                     # 十進位數字
@@ -160,6 +163,9 @@ class lexer:
                         cur_token = self.codes[self.position]
                         num += cur_token
                         self.position+=1
+                    # 檢查數字後是否有非法字元（例如 123abc 或 123.45）
+                    if(self.position < len(self.codes) and (self.codes[self.position].isalpha() or self.codes[self.position] == '_')):
+                        raise Exception(f"Syntax error: Invalid suffix on integer constant at line {self.line}")
                     self.tokens.append(token(token_type.number, self.line, num))
             # 字串/字元常值
             elif(cur_token == '"' or cur_token == "'"):
@@ -191,6 +197,11 @@ class lexer:
                             string += "'"
                         else:
                             raise Exception(f"Syntax error: Invalid escape sequence: \\{self.codes[self.position]} at line {self.line}")
+                    elif(self.codes[self.position] == '\n'):# 字串常值不得跨行
+                        if(quote_type == '"'):
+                            raise Exception(f"Syntax error: Unterminated string literal at line {self.line}")
+                        else:
+                            raise Exception(f"Syntax error: Unterminated character literal at line {self.line}")
                     else:
                         string += self.codes[self.position]
                     self.position+=1

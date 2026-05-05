@@ -177,15 +177,17 @@ class Interpreter:
             print("func call:", ast_node.fn, "args:", ast_node.args)
             function_name = ast_node.fn.name
             args = []
+            return_value = None
             for arg in ast_node.args:
                 args.append(self.evaluate(arg))
             if function_name in builtins_funcs:
                 if function_name in str_funcs:
-                    getattr(c_builtins,function_name)(self.memory,*args)
+                    return_value = getattr(c_builtins,function_name)(self.memory,*args)
                 else:
-                    getattr(c_builtins,function_name)(*args)
+                    return_value = getattr(c_builtins,function_name)(*args)
             else:
                 pass # 這裡要實作呼叫 user-defined 函式的邏輯，從符號表查函式定義，建立新的執行環境，執行函式體等
+            return return_value
         elif isinstance(ast_node, parser.VarDecl):
             # 1. 計算所需記憶體大小並配置空間
             size = 4 if ast_node.var_type == "int" else 1
