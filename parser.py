@@ -387,14 +387,14 @@ class parser:
             self.expect(")", lexer.token_type.punctuator)
             return expr
 
-        self.error("Expected expression", token)
+        self.error("Expected expression", token)    
     def parse_block(self):
         """解析大括號區塊 { ... }"""
         self.advance() # 吃掉 '{'
         statements = []
         # 一直解析語句，直到遇到 '}' 或檔案結束
         while not self.check("}", lexer.token_type.punctuator) and not self.is_at_end():
-            statements.append(self.parse()) # 遞迴呼叫你之前寫好的 parse()
+            statements.append(self.parse_statement()) # 遞迴呼叫你之前寫好的 parse()
             
         self.expect("}", lexer.token_type.punctuator)
         return Block(statements)
@@ -421,5 +421,5 @@ class parser:
         if self.check("{", lexer.token_type.punctuator):
             return self.parse_block()
         else:
-            return self.parse()
+            return self.parse_statement()
     

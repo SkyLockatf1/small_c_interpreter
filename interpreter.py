@@ -238,4 +238,13 @@ class Interpreter:
                 self.memory.set_char(var_info['addr'], new_val)
                 
             return new_val
+        
+        elif isinstance(ast_node, parser.IfStmt):
+            cond_val = self.evaluate(ast_node.condition)
+            
+            if cond_val == 1:
+                self.evaluate(ast_node.then_branch)
+            elif ast_node.else_branch is not None:
+                self.evaluate(ast_node.else_branch)
+            return None
             
