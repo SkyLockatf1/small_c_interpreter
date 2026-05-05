@@ -394,7 +394,7 @@ class parser:
         statements = []
         # 一直解析語句，直到遇到 '}' 或檔案結束
         while not self.check("}", lexer.token_type.punctuator) and not self.is_at_end():
-            statements.append(self.parse_statement()) # 遞迴呼叫你之前寫好的 parse()
+            statements.append(self.parse_statement()) # 遞迴呼叫parse_statement()處理單句
             
         self.expect("}", lexer.token_type.punctuator)
         return Block(statements)
