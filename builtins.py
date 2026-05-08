@@ -1,16 +1,24 @@
 import math
 import random
 from memory import VirtualMemory
+from extra_c_type import char_ptr, int_ptr
+
+type_mapping = {
+    'str': 'char',
+    'int': 'int',
+    'char_ptr': 'char*',
+    'int_ptr': 'int*',
+    'None': 'void',
+}
 
 # void puts(char* str);
-
-def puts(vm : VirtualMemory, char_ptr: int)-> None:
+def puts(vm : VirtualMemory, str: char_ptr)-> None:
     # 從 char_ptr 地址開始，逐字讀取直到遇到 \0
     offset = 0
     result = ""
     while True:
-        vm.check_bounds(char_ptr, char_ptr + 1, 1) # 確保 char_ptr 是有效地址
-        c = vm.get_char(char_ptr + offset)
+        vm.check_bounds(str.addr, str.addr + 1, 1) # 確保 char_ptr 是有效地址
+        c = vm.get_char(str.addr + offset)
         if c == 0:
             break
         result += chr(c)
@@ -20,13 +28,13 @@ def puts(vm : VirtualMemory, char_ptr: int)-> None:
     print(result)
 
 # void printf(char* fmt, ...);
-def printf(vm: VirtualMemory, format_addr: int, *args) -> None:
+def printf(vm: VirtualMemory, fmt: char_ptr, *args) -> None:
     # 簡化版 printf：支援 %%、%d、%s、%c、%x，並檢查參數數量與型別。
     format_str = ""
     offset = 0
     while True:
-        vm.check_bounds(format_addr, format_addr + offset, 1)
-        c = vm.get_char(format_addr + offset)
+        vm.check_bounds(fmt.addr, fmt.addr + offset, 1)
+        c = vm.get_char(fmt.addr + offset)
         if c == 0:
             break
         format_str += chr(c)
@@ -50,18 +58,24 @@ def printf(vm: VirtualMemory, format_addr: int, *args) -> None:
                     # char 在此直譯器中可能以長度為 1 的字串表示。
                     result += str(ord(args[arg_index]))
                 else:
-                    if(type(args[arg_index]).__name__=='str'):
-                        raise Exception("Runtime error: printf expects int or hex for %d, got char*")
-                    else:
-                        raise Exception(f"Runtime error: printf expects int or hex for %d, got {type(args[arg_index]).__name__}")
+                    got_type = type_mapping.get(type(args[arg_index]).__name__, type(args[arg_index]).__name__)
+                    raise Exception(f"Runtime error: printf expects int or hex for %d, got {got_type}")
                 arg_index += 1
                 i += 2
             elif specifier == 's':
                 if arg_index >= len(args):
                     raise Exception("Runtime error: printf argument missing")
-                if type(args[arg_index]) is not str:
-                    raise Exception(f"Runtime error: printf expects char* for %s, got {type(args[arg_index]).__name__}")
-                result += args[arg_index]
+                if type(args[arg_index]) is not char_ptr:
+                    got_type = type_mapping.get(type(args[arg_index]).__name__, type(args[arg_index]).__name__)
+                    raise Exception(f"Runtime error: printf expects char* for %s, got {got_type}")
+                str_offset = 0
+                while True:
+                    vm.check_bounds(args[arg_index].addr, args[arg_index].addr + str_offset, 1)
+                    c = vm.get_char(args[arg_index].addr + str_offset)
+                    if c == 0:
+                        break
+                    result += chr(c)
+                    str_offset += 1
                 arg_index += 1
                 i += 2
             elif specifier == 'c':
@@ -73,20 +87,16 @@ def printf(vm: VirtualMemory, format_addr: int, *args) -> None:
                 elif type(value) is str and len(value) == 1:
                     result += value
                 else:
-                    if(type(args[arg_index]).__name__=='str'):
-                        raise Exception("Runtime error: printf expects char for %d, got char*")
-                    else:
-                        raise Exception(f"Runtime error: printf expects char for %c, got {type(value).__name__}")
+                    got_type = type_mapping.get(type(value).__name__, type(value).__name__)
+                    raise Exception(f"Runtime error: printf expects char for %c, got {got_type}")
                 arg_index += 1
                 i += 2
             elif specifier == 'x':
                 if arg_index >= len(args):
                     raise Exception("Runtime error: printf argument missing")
                 if type(args[arg_index]) is not int:
-                    if(type(args[arg_index]).__name__=='str'):
-                        raise Exception("Runtime error: printf expects char for %d, got char*")
-                    else:
-                        raise Exception(f"Runtime error: printf expects int or hex for %x, got {type(args[arg_index]).__name__}")
+                    got_type = type_mapping.get(type(args[arg_index]).__name__, type(args[arg_index]).__name__)
+                    raise Exception(f"Runtime error: printf expects int or hex for %x, got {got_type}")
                 result += format(args[arg_index], 'x') # format () 會回傳字串
                 arg_index += 1
                 i += 2
@@ -106,7 +116,7 @@ def printf(vm: VirtualMemory, format_addr: int, *args) -> None:
 def putchar(ch:int)-> int:
     print(chr(ch), end='')
     return ch
-
+#int getchar();
 def getchar()-> int:
     ch = input()
     return ord(ch[0]) if ch else -1
@@ -141,16 +151,17 @@ def rand()-> int:
     return random.randint(0, 32767)
 
 #memory and tool functions
-def memset(vm: VirtualMemory,char_ptr: int, value: int, num: int)-> None:
+#void memset(char* ptr, int value, int size);
+def memset(vm: VirtualMemory,ptr: char_ptr, value: int, num: int)-> None:
     for i in range(num):
-        vm.set_char(char_ptr + i, value)
+        vm.set_char(ptr.addr + i, value)
 #int strlen(char* str);
-def strlen(vm: VirtualMemory,str_addr: int)-> int:
+def strlen(vm: VirtualMemory,s: char_ptr)-> int:
     length = 0
-    while vm.get_char(str_addr + length) != 0:
+    while vm.get_char(s.addr + length) != 0:
         length += 1
     return length
-
+#int sizeof_int()
 def sizeof_int()-> int:
     return 4
 
@@ -161,26 +172,26 @@ def atio(char_str: str)-> int:
     return int(char_str)
 
 #void strcpy(char *dest, char *src);
-def strcpy(vm: VirtualMemory, dest_addr: int, src_addr: int)-> None:
+def strcpy(vm: VirtualMemory, dest: char_ptr, src: char_ptr)-> None:
 
     i = 0
     while True:
-        vm.check_bounds(dest_addr, dest_addr + i, 1)
-        vm.check_bounds(src_addr, src_addr + i, 1)
+        vm.check_bounds(dest.addr, dest.addr + i, 1)
+        vm.check_bounds(src.addr, src.addr + i, 1)
 
-        c = vm.get_char(src_addr + i)
-        vm.set_char(dest_addr + i, c)
+        c = vm.get_char(src.addr + i)
+        vm.set_char(dest.addr + i, c)
         if c == 0:
             break
         i += 1
 
 #int strcmp(char *s1, char *s2)
-def strcmp(vm: VirtualMemory, s1_addr: int, s2_addr: int)-> int:
-    vm.check_bounds(s1_addr, s1_addr + 1, 1)
+def strcmp(vm: VirtualMemory, s1: char_ptr, s2: char_ptr)-> int:
+    vm.check_bounds(s1.addr, s1.addr + 1, 1)
     i = 0
     while True:
-        c1 = vm.get_char(s1_addr + i)
-        c2 = vm.get_char(s2_addr + i)
+        c1 = vm.get_char(s1.addr + i)
+        c2 = vm.get_char(s2.addr + i)
         if c1 != c2:
             return c1 - c2
         if c1 == 0: # both strings end
