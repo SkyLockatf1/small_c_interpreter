@@ -38,6 +38,14 @@ for name, obj in inspect.getmembers(c_builtins, inspect.isfunction):
 # 字串相關函式需要讀寫虛擬記憶體，因此呼叫時會額外傳入 memory 物件。
 str_funcs = ["memset","strlen","strcmp","strcpy","strcat","printf","puts","scanf"]
 
+# break / continue 可能出現在巢狀 block 或 if 裡，
+# 用內部 signal 往外傳遞，直到最近的迴圈節點接住。
+class BreakSignal(Exception):
+    pass
+
+class ContinueSignal(Exception):
+    pass
+
 class Interpreter:
     """執行 AST 的狀態容器。"""
 
@@ -312,8 +320,35 @@ class Interpreter:
         elif isinstance(ast_node, parser.WhileStmt):
             # while 只要條件成立就持續回圈執行 body。
             while self.evaluate(ast_node.condition) != 0:
-                self.evaluate(ast_node.body)
+                try:
+                    self.evaluate(ast_node.body)
+                except ContinueSignal:
+                    # continue 跳過本輪剩餘敘述，回到 while 條件檢查。
+                    continue
+                except BreakSignal:
+                    # break 結束最近一層 while 迴圈。
+                    break
             return None
+        elif isinstance(ast_node, parser.DoWhileStmt):
+            # do-while 的 continue 仍需先檢查條件，再決定是否進入下一輪。
+            while True:
+                try:
+                    self.evaluate(ast_node.body)
+                except ContinueSignal:
+                    # do-while 的 continue 不直接進下一輪，而是先落到下方條件檢查。
+                    pass
+                except BreakSignal:
+                    # break 結束最近一層 do-while 迴圈。
+                    break
+                if self.evaluate(ast_node.condition) == 0:
+                    break
+            return None
+        elif isinstance(ast_node, parser.BreakStmt):
+            # 交給外層最近的迴圈處理。
+            raise BreakSignal()
+        elif isinstance(ast_node, parser.ContinueStmt):
+            # 交給外層最近的迴圈處理。
+            raise ContinueSignal()
         elif isinstance(ast_node, parser.Block):
             # 區塊按順序執行其中每一個語句。
             for stmt in ast_node.statements:
