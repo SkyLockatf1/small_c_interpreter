@@ -28,7 +28,75 @@ def handle_list(buffer: list, args: str):
         # 只要不是以上兩種格式，就報錯（包含 1,5 或 1 5）
         raise Exception(f"Runtime error: Invalid format '{args}'. Use 'n' or 'n1-n2' or without arguments.")
     repl.LIST(buffer, n)
-    
+ 
+def check_input_complete(pending_buffer: str) -> bool:
+    """只判斷 REPL 是否還需要續行；語法錯誤交給 lexer/parser 處理。"""
+    stack = []
+    pairs = {")": "(", "]": "[", "}": "{"}
+    i = 0
+    length = len(pending_buffer)
+    state = "normal" # normal, block_comment, string_or_char （後者兩者都不處理括號配對）
+    quote = None
+
+    while i < length:
+        ch = pending_buffer[i]
+
+        if state == "block_comment":
+            # 區塊註解未結束代表使用者可能還會繼續輸入下一行。
+            if pending_buffer.startswith("*/", i):
+                state = "normal"
+                i += 2
+                continue
+            i += 1
+            continue
+
+        if state == "string_or_char":
+            if ch == "\n":
+                # 字串/字元是否允許跨行由 lexer 判斷；如果不允許跨行，這裡遇到換行就直接當作輸入結束，讓後續的 lexer 報錯。
+                return True
+            if ch == "\\":
+                # 跳過跳脫字元後面的字元，避免把 \" 或 \' 誤判成字串結尾。
+                i += 2
+                continue
+            if ch == quote:
+                state = "normal"
+                quote = None
+            i += 1
+            continue
+
+        if ch == "\n":
+            i += 1
+            continue
+        if pending_buffer.startswith("//", i):
+            # 單行註解後面的括號不應影響完整性判斷。
+            while i < length and pending_buffer[i] != "\n":
+                i += 1
+            continue
+        if pending_buffer.startswith("/*", i):
+            # 進入區塊註解後，只等待 */，不檢查其中的括號。
+            state = "block_comment"
+            i += 2
+            continue
+        if ch == '"' or ch == "'":
+            # 字串/字元常數中的括號只是文字，不參與配對。
+            state = "string_or_char"
+            quote = ch
+            i += 1
+            continue
+        if ch in "({[":
+            stack.append(ch)
+        elif ch in ")}]":
+            # 多出的或錯配的右括號不是「未完成輸入」，交給 parser 報語法錯誤。
+            if not stack or stack[-1] != pairs[ch]:
+                return True
+            stack.pop()
+        i += 1
+
+    if state == "block_comment" or stack:
+        # 只有仍在區塊註解中，或仍有未關閉的左括號/大括號/中括號，才需要續行。
+        return False
+    return True
+
 if __name__ == "__main__":
 #     print(""" 
 # ╔══════════════════════════════════════════════════════════════════════════════╗
@@ -116,13 +184,18 @@ if __name__ == "__main__":
             
             # 2. 如果不是環境指令，才視為 Small-C 程式碼執行
             else:
+                pending_buffer = raw_input + "\n" # 先把第一行程式碼存進 buffer，後續如果不完整再繼續讀取
                 buffer.append(raw_input) # 只有程式碼才存進 buffer (依規範而定)
+                while not check_input_complete(pending_buffer):
+                    next_line = input(">>> ").strip()
+                    pending_buffer += next_line + "\n"
+                    buffer.append(next_line)
                 # 執行 Lexer, Parser...
-                lexer_instance = lexer.lexer(raw_input)
+                lexer_instance = lexer.lexer(pending_buffer)
                 tokens = lexer_instance.tokenize()
                 parser_instance = parser.parser(tokens)
-                statements = parser_instance.parse()
-                for ast in statements:
+                program = parser_instance.parse()
+                for ast in program:
                     print("AST:", ast)
                     result = interpreter_instance.evaluate(ast)
                 # print("Result:", result)
