@@ -4,11 +4,20 @@ import inspect
 import parser
 import memory
 import symtable as symtable
+from extra_c_type import char_ptr, int_ptr
+"""C-like 直譯器核心。
+
+這個模組負責把 parser 產生的 AST 逐步求值，並透過虛擬記憶體與符號表
+模擬 C 語言的變數、指標與函式呼叫行為。
+"""
 
 # 將 Python 執行時的型別名稱轉成錯誤訊息中較接近 C 語言的型別名稱。
 type_mapping = {
-    'str': 'char*',
-    'int': 'int'
+    'str': 'char',
+    'int': 'int',
+    'char_ptr': 'char*',
+    'int_ptr': 'int*',
+    'None': 'void',
 }
 # 用 importlib 按路徑載入本地 builtins.py，
 # 避免與 Python 內建的 builtins 模組（存放 print/len 等）同名衝突。
@@ -27,65 +36,98 @@ for name, obj in inspect.getmembers(c_builtins, inspect.isfunction):
         builtins_funcs.append(name)
 
 # 字串相關函式需要讀寫虛擬記憶體，因此呼叫時會額外傳入 memory 物件。
-str_funcs = ["memset","strlen","strcmp","strcpy","strcat","printf","puts"]
+str_funcs = ["memset","strlen","strcmp","strcpy","strcat","printf","puts","scanf"]
 
 class Interpreter:
+    """執行 AST 的狀態容器。"""
+
     def __init__(self):
         # 保存目前執行環境的虛擬記憶體與符號表，後續求值時會用來查變數、地址與函式。
-        self.memory:memory = memory.VirtualMemory()
-        self.symtable:symtable = symtable.symtable()
-    def evaluate(self, ast_node):
+        self.memory: memory.VirtualMemory = memory.VirtualMemory()
+        self.symtable: symtable.symtable = symtable.symtable()
+
+    def evaluate(self, ast_node) -> object:
         # 根據 AST 節點型別遞迴求值，回傳此節點在目前執行環境中的值。
         if isinstance(ast_node, parser.Number):
+            # 數字常數直接回傳原值，不需要額外查表。
             return ast_node.value
         elif isinstance(ast_node, parser.Char):
+            # 字元常數在 AST 中已經是單一值，直接回傳。
             return ast_node.value 
         elif isinstance(ast_node, parser.String):
-            return self.memory.set_string(ast_node.value) #放進記憶體並回傳地址
-        elif isinstance(ast_node, parser.Pointer):
-            pass # 這裡要實作指標取值邏輯，類似 C 語言的 *ptr
+            # 字串常數先配置到虛擬記憶體，再回傳起始位址。
+            return char_ptr(self.memory.set_string(ast_node.value), len(ast_node.value)+1) #放進記憶體並回傳地址 （包含結尾的 \0 字元）
         elif isinstance(ast_node, parser.UnaryExpr):
-            # 一元運算會先求出 operand 的值，再依照運算子做型別檢查與計算。
-            val = self.evaluate(ast_node.operand)
+            # 一元運算依 operator 決定是否需要先取 operand 的值。
             if ast_node.operator == "-":
+                val = self.evaluate(ast_node.operand)
+                if isinstance(val, str):
+                    val = ord(val) # 允許 char 以 int 形式參與運算
                 if not isinstance(val, (int)):
                     raise Exception(f"Runtime error: Cannot apply unary '-' to {type_mapping[type(val).__name__]} at line {ast_node.line}.")
                 return -val
             elif ast_node.operator == "!":
+                val = self.evaluate(ast_node.operand)
+                if isinstance(val, str):
+                    val = ord(val) # 允許 char 以 int 形式參與運算
                 if not isinstance(val, (int)):
-                    raise Exception(f"Runtime error: Cannot apply unary '+' to {type_mapping[type(val).__name__]} at line {ast_node.line}.")
+                    raise Exception(f"Runtime error: Cannot apply unary '!' to {type_mapping[type(val).__name__]} at line {ast_node.line}.")
                 return int(not val)
             elif ast_node.operator == "~":
+                val = self.evaluate(ast_node.operand)
+                if isinstance(val, str):
+                    val = ord(val) # 允許 char 以 int 形式參與運算
                 if not isinstance(val, (int)):
                     raise Exception(f"Runtime error: Cannot apply unary '~' to {type_mapping[type(val).__name__]} at line {ast_node.line}.")
                 return ~val
             elif ast_node.operator == "&":
                 if not isinstance(ast_node.operand, parser.Identifier):
                     raise Exception(f"Runtime error: Cannot apply unary '&' to non-variable at line {ast_node.line}.")
-                else:
-                    pass
+                pass# 這裡要實作取地址邏輯，類似 C 語言的 &var，從符號表查出變數的位址並回傳
             elif ast_node.operator == "++" and ast_node.postfix == False:
-                # 目前只處理前置 ++ 的回傳值，尚未把結果寫回變數本身。
-                if not isinstance(val, (int)):
-                    raise Exception(f"Runtime error: Cannot apply unary '++' to {type_mapping[type(val).__name__]} at line {ast_node.line}.")
-                return val + 1
+                if not isinstance(ast_node.operand, parser.Identifier):
+                    raise Exception(f"Runtime error: Cannot apply unary '++' to non-variable at line {ast_node.line}.")
+                var_info = self.symtable.lookup(ast_node.operand.name)
+                old_val=0
+                if var_info['type'] == 'int':
+                    old_val = self.memory.get_int(var_info['addr'])
+                    self.memory.set_int(var_info['addr'], old_val + 1)
+                elif var_info['type'] == 'char':
+                    old_val = self.memory.get_char(var_info['addr'])
+                    self.memory.set_char(var_info['addr'], old_val + 1)
+                else:
+                    raise Exception(f"Runtime error: Unsupported variable type {var_info['type']} for variable '{ast_node.operand.name}' at line {ast_node.line}.")
+                return old_val + 1
             elif ast_node.operator == "--" and ast_node.postfix == False:
-                # 目前只處理前置 -- 的回傳值，尚未把結果寫回變數本身。
-                if not isinstance(val, (int)):
-                    raise Exception(f"Runtime error: Cannot apply unary '--' to {type_mapping[type(val).__name__]} at line {ast_node.line}.")
-                return val - 1
+                if not isinstance(ast_node.operand, parser.Identifier):
+                    raise Exception(f"Runtime error: Cannot apply unary '--' to non-variable at line {ast_node.line}.")
+                var_info = self.symtable.lookup(ast_node.operand.name)
+                old_val=0
+                if var_info['type'] == 'int':
+                    old_val = self.memory.get_int(var_info['addr'])
+                    self.memory.set_int(var_info['addr'], old_val - 1)
+                elif var_info['type'] == 'char':
+                    old_val = self.memory.get_char(var_info['addr'])
+                    self.memory.set_char(var_info['addr'], old_val - 1)
+                else:
+                    raise Exception(f"Runtime error: Unsupported variable type {var_info['type']} for variable '{ast_node.operand.name}' at line {ast_node.line}.")
+                return old_val - 1
                 
                 
         elif isinstance(ast_node, parser.BinaryExpr):
             # 二元運算採延遲求值：先求左子表達式，
             # 對於 && / || 採短路（必要時才求右子表達式），其餘運算再求右子表達式。
             left_val = self.evaluate(ast_node.left)
+            if isinstance(left_val, str):
+                left_val = ord(left_val) # 允許 char 以 int 形式參與運算
             if ast_node.operator == "&&":
                 if not isinstance(left_val, (int)):
                     raise Exception(f"Runtime error: Cannot apply operator '&&' to {type_mapping[type(left_val).__name__]} and <right> at line {ast_node.line}.")
                 if not left_val:
                     return 0
                 right_val = self.evaluate(ast_node.right)
+                if isinstance(right_val, str):
+                    right_val = ord(right_val) # 允許 char 以 int 形式參與運算
                 if not isinstance(right_val, (int)):
                     raise Exception(f"Runtime error: Cannot apply operator '&&' to {type_mapping[type(left_val).__name__]} and {type_mapping[type(right_val).__name__]} at line {ast_node.line}.")
                 return 1 if left_val and right_val else 0
@@ -95,12 +137,17 @@ class Interpreter:
                 if left_val:
                     return 1
                 right_val = self.evaluate(ast_node.right)
+                if isinstance(right_val, str):
+                    right_val = ord(right_val) # 允許 char 以 int 形式參與運算
                 if not isinstance(right_val, (int)):
                     raise Exception(f"Runtime error: Cannot apply operator '||' to {type_mapping[type(left_val).__name__]} and {type_mapping[type(right_val).__name__]} at line {ast_node.line}.")
                 return 1 if left_val or right_val else 0
             # 非短路運算再求右子表達式
             right_val = self.evaluate(ast_node.right)
+            if isinstance(right_val, str):
+                right_val = ord(right_val) # 允許 char 以 int 形式參與運算
             if ast_node.operator == "+":
+                # 算術運算只接受整數值。
                 if not isinstance(left_val, (int)) or not isinstance(right_val, (int)):
                     raise Exception(f"Runtime error: Cannot apply operator '+' to {type_mapping[type(left_val).__name__]} and {type_mapping[type(right_val).__name__]} at line {ast_node.line}.")
                 return left_val + right_val
@@ -115,37 +162,41 @@ class Interpreter:
             elif ast_node.operator == "/":
                 if not isinstance(left_val, (int)) or not isinstance(right_val, (int)):
                     raise Exception(f"Runtime error: Cannot apply operator '/' to {type_mapping[type(left_val).__name__]} and {type_mapping[type(right_val).__name__]} at line {ast_node.line}.")
+                if right_val == 0:
+                    raise Exception(f"Runtime error: Division by zero at line {ast_node.line}.")
                 return left_val // right_val
             elif ast_node.operator == "%":
                 if not isinstance(left_val, (int)) or not isinstance(right_val, (int)):
                     raise Exception(f"Runtime error: Cannot apply operator '%' to {type_mapping[type(left_val).__name__]} and {type_mapping[type(right_val).__name__]} at line {ast_node.line}.")
+                if right_val == 0:
+                    raise Exception(f"Runtime error: Modulo by zero at line {ast_node.line}.")
                 return left_val % right_val
             elif ast_node.operator == "&":
-                if type(left_val) != type(right_val):
-                    raise Exception(f"Runtime error: Cannot compare {type_mapping[type(left_val).__name__]} and {type_mapping[type(right_val).__name__]} with '&' at line {ast_node.line}.")
+                if not isinstance(left_val, (int)) or not isinstance(right_val, (int)):
+                    raise Exception(f"Runtime error: Cannot apply operator '&' to {type_mapping[type(left_val).__name__]} and {type_mapping[type(right_val).__name__]} at line {ast_node.line}.")
                 return left_val & right_val
             elif ast_node.operator == "|":
-                if type(left_val) != type(right_val):
-                    raise Exception(f"Runtime error: Cannot compare {type_mapping[type(left_val).__name__]} and {type_mapping[type(right_val).__name__]} with '|' at line {ast_node.line}.")
+                if not isinstance(left_val, (int)) or not isinstance(right_val, (int)):
+                    raise Exception(f"Runtime error: Cannot apply operator '|' to {type_mapping[type(left_val).__name__]} and {type_mapping[type(right_val).__name__]} at line {ast_node.line}.")
                 return left_val | right_val
             elif ast_node.operator == "^":
-                if type(left_val) != type(right_val):
-                    raise Exception(f"Runtime error: Cannot compare {type_mapping[type(left_val).__name__]} and {type_mapping[type(right_val).__name__]} with '^' at line {ast_node.line}.")
+                if not isinstance(left_val, (int)) or not isinstance(right_val, (int)):
+                    raise Exception(f"Runtime error: Cannot apply operator '^' to {type_mapping[type(left_val).__name__]} and {type_mapping[type(right_val).__name__]} at line {ast_node.line}.")
                 return left_val ^ right_val
             elif ast_node.operator == "<<":
-                if type(left_val) != type(right_val):
-                    raise Exception(f"Runtime error: Cannot compare {type_mapping[type(left_val).__name__]} and {type_mapping[type(right_val).__name__]} with '<<' at line {ast_node.line}.")
+                if not isinstance(left_val, (int)) or not isinstance(right_val, (int)):
+                    raise Exception(f"Runtime error: Cannot apply operator '<<' to {type_mapping[type(left_val).__name__]} and {type_mapping[type(right_val).__name__]} at line {ast_node.line}.")
                 return left_val << right_val
             elif ast_node.operator == ">>":
-                if type(left_val) != type(right_val):
-                    raise Exception(f"Runtime error: Cannot compare {type_mapping[type(left_val).__name__]} and {type_mapping[type(right_val).__name__]} with '>>' at line {ast_node.line}.")
+                if not isinstance(left_val, (int)) or not isinstance(right_val, (int)):
+                    raise Exception(f"Runtime error: Cannot apply operator '>>' to {type_mapping[type(left_val).__name__]} and {type_mapping[type(right_val).__name__]} at line {ast_node.line}.")
                 return left_val >> right_val
             elif ast_node.operator == "==":
-                if type(left_val) != type(right_val):
+                if not isinstance(left_val, (int)) or not isinstance(right_val, (int)):
                     raise Exception(f"Runtime error: Cannot compare {type_mapping[type(left_val).__name__]} and {type_mapping[type(right_val).__name__]} with '==' at line {ast_node.line}.")
                 return 1 if left_val == right_val else 0
             elif ast_node.operator == "!=":
-                if type(left_val) != type(right_val):
+                if not isinstance(left_val, (int)) or not isinstance(right_val, (int)):
                     raise Exception(f"Runtime error: Cannot compare {type_mapping[type(left_val).__name__]} and {type_mapping[type(right_val).__name__]} with '!=' at line {ast_node.line}.")
                 return 1 if left_val != right_val else 0
             elif ast_node.operator == "<":
@@ -164,18 +215,12 @@ class Interpreter:
                 if not isinstance(left_val, (int)) or not isinstance(right_val, (int)):
                     raise Exception(f"Runtime error: Cannot compare {type_mapping[type(left_val).__name__]} and {type_mapping[type(right_val).__name__]} with '>=' at line {ast_node.line}.")
                 return 1 if left_val >= right_val else 0
-            elif ast_node.operator == "&&":
-                if not isinstance(left_val, (int)) or not isinstance(right_val, (int)):
-                    raise Exception(f"Runtime error: Cannot apply operator '&&' to {type_mapping[type(left_val).__name__]} and {type_mapping[type(right_val).__name__]} at line {ast_node.line}.")
-                return 1 if left_val and right_val else 0
-            elif ast_node.operator == "||":
-                if not isinstance(left_val, (int)) or not isinstance(right_val, (int)):
-                    raise Exception(f"Runtime error: Cannot apply operator '||' to {type_mapping[type(left_val).__name__]} and {type_mapping[type(right_val).__name__]} at line {ast_node.line}.")
-                return 1 if left_val or right_val else 0
         elif isinstance(ast_node,parser.CallExpr):
             # 函式呼叫會先求出所有參數，再分流到內建函式或使用者自訂函式。
             print("func call:", ast_node.fn, "args:", ast_node.args)
             function_name = ast_node.fn.name
+            if not isinstance(ast_node.fn, parser.Identifier):
+                raise Exception(f"Runtime error: Function name must be an identifier at line {ast_node.line}.")
             args = []
             return_value = None
             for arg in ast_node.args:
@@ -199,10 +244,16 @@ class Interpreter:
             # 3. 如果有給初始值，算出來並寫入記憶體
             if ast_node.init_expr:
                 val = self.evaluate(ast_node.init_expr)
-                if ast_node.var_type == "int":
+                if ast_node.var_type == "int" and isinstance(val, (int,str)):
+                    if(isinstance(val, str)):
+                        val = ord(val) # 允許 char 以 int 形式初始化 int 變數
                     self.memory.set_int(addr, val)
-                elif ast_node.var_type == "char":
+                elif ast_node.var_type == "char" and isinstance(val, (int,str)):
+                    if isinstance(val, int):
+                        val = chr(val) # 允許 int 以 char 形式初始化 char 變數
                     self.memory.set_char(addr, val)
+                else:
+                    raise Exception(f"Runtime error: Cannot initialize variable '{ast_node.name}' of type {ast_node.var_type} with value of type {type_mapping[type(val).__name__]} at line {ast_node.line}.")
             return None # 宣告敘述不產生數值回傳
         elif isinstance(ast_node, parser.Identifier):
             # 變數取值：先查符號表拿位址，再從記憶體讀值
@@ -210,7 +261,9 @@ class Interpreter:
             if var_info['type'] == 'int':
                 return self.memory.get_int(var_info['addr'])
             elif var_info['type'] == 'char':
-                return self.memory.get_char(var_info['addr'])
+                return chr(self.memory.get_char(var_info['addr']))
+            else:
+                raise Exception(f"Runtime error: Unsupported variable type {var_info['type']} for variable '{ast_node.name}' at line {ast_node.line}.")
         elif isinstance(ast_node, parser.AssignmentExpr):
             # 指定運算：目前我們只處理左邊是單純變數名的情況
             if not isinstance(ast_node.left, parser.Identifier):
@@ -229,7 +282,15 @@ class Interpreter:
             if ast_node.operator == "=": new_val = right_val
             elif ast_node.operator == "+=": new_val = old_val + right_val
             elif ast_node.operator == "-=": new_val = old_val - right_val
-            # (你可以依樣畫葫蘆補齊 *=, /=, %=)
+            elif ast_node.operator == "*=": new_val = old_val * right_val
+            elif ast_node.operator == "/=":
+                if right_val == 0:
+                    raise Exception(f"Runtime error: Division by zero at line {ast_node.line}.")
+                new_val = old_val // right_val
+            elif ast_node.operator == "%=": 
+                if right_val == 0:
+                    raise Exception(f"Runtime error: Modulo by zero at line {ast_node.line}.")
+                new_val = old_val % right_val
             
             # 寫入記憶體
             if var_info['type'] == 'int':
@@ -239,12 +300,24 @@ class Interpreter:
                 
             return new_val
         
+        elif isinstance(ast_node, parser.EmptyStmt):
+            return None
         elif isinstance(ast_node, parser.IfStmt):
-            cond_val = self.evaluate(ast_node.condition)
-            
-            if cond_val == 1:
+            # if/else 依條件值決定只執行其中一個分支。
+            if self.evaluate(ast_node.condition) != 0:
                 self.evaluate(ast_node.then_branch)
             elif ast_node.else_branch is not None:
                 self.evaluate(ast_node.else_branch)
             return None
-            
+        elif isinstance(ast_node, parser.WhileStmt):
+            # while 只要條件成立就持續回圈執行 body。
+            while self.evaluate(ast_node.condition) != 0:
+                self.evaluate(ast_node.body)
+            return None
+        elif isinstance(ast_node, parser.Block):
+            # 區塊按順序執行其中每一個語句。
+            for stmt in ast_node.statements:
+                self.evaluate(stmt)
+            return None
+        else:
+            raise Exception(f"Runtime error: Unsupported AST node type {type(ast_node).__name__} at line {ast_node.line}.")
