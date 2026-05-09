@@ -158,11 +158,13 @@ if __name__ == "__main__":
             elif cmd == "NEW":
                 buffer.clear()
                 interpreter_instance = interpreter.Interpreter()
-                pass
             elif cmd == "LOAD":
                 pass
             elif cmd == "SAVE":
-                pass
+                if args:
+                    repl.SAVE(buffer, args)
+                else:
+                    raise Exception(f"Runtime error: Invalid format '{args}'. Use 'filename' for saving the program.")
             elif cmd == "TRACE":
                 pass
             elif cmd == "VARS":

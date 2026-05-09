@@ -39,13 +39,13 @@ def APPEND(buffer:list[str]):
         buffer.append(new_code)
 
 # 依作業系統執行對應的清屏指令
-def CLEAR():
+def CLEAR() -> None:
     os.system("cls" if os.name == "nt" else "clear") #跨平台清屏
 
 # 列出 buffer：支援全列、單行、範圍
-def LIST(buffer:list[str], args:list[int]):
+def LIST(buffer:list[str], args:list[int]) -> None:
     if(len(buffer) == 0):
-        raise Exception("Runtime error: Program buffer is empty.")
+        raise Exception("REPL error: Program buffer is empty.")
     else:
         if len(args) == 0:
             for i in range(len(buffer)):
@@ -53,27 +53,27 @@ def LIST(buffer:list[str], args:list[int]):
                 
         elif len(args) == 1:
             if args[0] < 1 or args[0] > len(buffer):
-                raise Exception(f"Runtime error: Index {args[0]} out of bounds.")
+                raise Exception(f"REPL error: Index {args[0]} out of bounds.")
             print("["+str(args[0])+"]: "+buffer[args[0]-1])
 
         elif len(args) == 2:
             # 範圍模式先檢查上下界，避免索引錯誤
             if args[0] < 1 or args[0] > len(buffer) or args[1] < 1 or args[1] > len(buffer):
-                raise Exception(f"Runtime error: Index out of bounds. Valid range is 1 to {len(buffer)}")
+                raise Exception(f"REPL error: Index out of bounds. Valid range is 1 to {len(buffer)}")
             if args[0] > args[1]: 
-                raise Exception("Runtime error: Start index cannot be greater than end index.")
+                raise Exception("REPL error: Start index cannot be greater than end index.")
             for i in range(args[0], args[1]+1):
                 print("["+str(i)+"]: "+buffer[i-1])
         else:
-            raise Exception(f"Runtime error: Too many arguments for LIST. Expected 0, 1, or 2, got {len(args)}")
+            raise Exception(f"REPL error: Too many arguments for LIST. Expected 0, 1, or 2, got {len(args)}")
 
 # 編輯指定行；輸入空字串代表取消修改
-def EDIT(buffer: list[str], arg: int):
+def EDIT(buffer: list[str], arg: int) -> None:
     if len(buffer) == 0:
-        raise Exception("Runtime error: Program buffer is empty.")
+        raise Exception("REPL error: Program buffer is empty.")
     else:
         if arg < 1 or arg > len(buffer):
-            raise Exception(f"Runtime error: Index {arg} out of bounds. Valid range is 1 to {len(buffer)}")
+            raise Exception(f"REPL error: Index {arg} out of bounds. Valid range is 1 to {len(buffer)}")
         print(f"Current code at line {arg}: {buffer[arg-1]}")
         new_code = input("Enter new code: ").strip()
         if new_code == "":
@@ -81,9 +81,9 @@ def EDIT(buffer: list[str], arg: int):
         buffer[arg-1] = new_code
 
 # 在第 arg 行之前插入；arg=len(buffer)+1 代表尾端插入
-def INSERT(buffer: list[str], arg: int):
+def INSERT(buffer: list[str], arg: int) -> None:
     if arg < 1 or arg > len(buffer)+1:
-        raise Exception(f"Runtime error: Index {arg} out of bounds. Valid range is 1 to {len(buffer)+1}")
+        raise Exception(f"REPL error: Index {arg} out of bounds. Valid range is 1 to {len(buffer)+1}")
     offset = 0
     while True:
         insert_code = input("Enter code to insert (or '.' to finish):").strip()
@@ -94,22 +94,39 @@ def INSERT(buffer: list[str], arg: int):
         offset += 1
 
 # 刪除單行或範圍；範圍刪除採反向避免索引位移
-def DELETE(buffer: list[str], args: list[int]):
+def DELETE(buffer: list[str], args: list[int]) -> None:
     if len(buffer) == 0:
-        raise Exception("Runtime error: Program buffer is empty.")
+        raise Exception("REPL error: Program buffer is empty.")
     else:
         if(len(args) == 0):
-            raise Exception("Runtime error: DELETE command requires at least one argument.")
+            raise Exception("REPL error: DELETE command requires at least one argument.")
         elif(len(args) == 1):
             if args[0] < 1 or args[0] > len(buffer):
-                raise Exception(f"Runtime error: Index {args[0]} out of bounds. Valid range is 1 to {len(buffer)}")
+                raise Exception(f"REPL error: Index {args[0]} out of bounds. Valid range is 1 to {len(buffer)}")
             buffer.pop(args[0]-1)
         elif(len(args) == 2):
             if args[0] < 1 or args[0] > len(buffer) or args[1] < 1 or args[1] > len(buffer):
-                raise Exception(f"Runtime error: Index out of bounds. Valid range is 1 to {len(buffer)}")
+                raise Exception(f"REPL error: Index out of bounds. Valid range is 1 to {len(buffer)}")
             if args[0] > args[1]:
-                raise Exception("Runtime error: Start index cannot be greater than end index.")
+                raise Exception("REPL error: Start index cannot be greater than end index.")
             for i in range(args[1], args[0]-1, -1):
                 buffer.pop(i-1)
         else:
-            raise Exception("Runtime error: DELETE command requires 1 or 2 arguments.")
+            raise Exception("REPL error: DELETE command requires 1 or 2 arguments.")
+def SAVE(buffer: list[str], filename: str) -> None:
+    if len(buffer) == 0:
+        raise Exception("REPL error: Program buffer is empty.")
+    else:
+        try:
+            line = len(buffer)
+            with open(filename, "w") as f:
+                    for line in buffer:
+                        if line != buffer[-1]: # 最後一行不加換行符
+                            f.write(line + "\n")
+                        else:
+                            f.write(line)
+            print(f"Saved {len(buffer)} lines to '{filename}'.")
+        except PermissionError:
+            raise Exception(f"REPL error: Permission denied when trying to write to '{filename}'.")
+        except IsADirectoryError:
+            raise Exception(f"REPL error: Invalid filename '{filename}'.")
