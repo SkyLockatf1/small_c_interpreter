@@ -140,6 +140,16 @@ class DoWhileStmt:
     def __repr__(self):
         return f"DoWhileStmt({self.body}, {self.condition})"
 
+class ForStmt:
+    """For 迴圈 AST 節點，例如 for (init; condition; update) body。"""
+    def __init__(self, init, condition, update, body):
+        self.init = init              # VarDecl / expression / None
+        self.condition = condition    # expression / None，None 代表永遠成立
+        self.update = update          # expression / None
+        self.body = body              # 單一 statement 或 Block
+    def __repr__(self):
+        return f"ForStmt({self.init}, {self.condition}, {self.update}, {self.body})"
+
 class BreakStmt:
     """Break 敘述 AST 節點。"""
     def __init__(self, line):
@@ -170,7 +180,7 @@ class parser:
         # position 指向 current_token 在 tokens 中的位置；讀完時 current_token 會是 None。
         self.position: int = 0
         self.current_token: lexer.token = self.peek()
-        self.statements = []  # 用來存放多行程式碼的 AST，讓 REPL 可以一次執行整段程式碼
+        self.program = []  # 用來存放多行程式碼的 AST，讓 REPL 可以一次執行整段程式碼
         self.loop_depth: int = 0
 
     def peek(self, offset=0):
@@ -241,17 +251,19 @@ class parser:
             return self.parse_while_statement()
         if self.check("do", lexer.token_type.keyword):
             return self.parse_do_while_statement()
+        if self.check("for", lexer.token_type.keyword):
+            return self.parse_for_statement()
         if self.check("break", lexer.token_type.keyword):
             return self.parse_break_statement()
         if self.check("continue", lexer.token_type.keyword):
             return self.parse_continue_statement()
 
         # 2. 處理獨立的區塊 { ... }
-        if token.type == lexer.token_type.punctuator and token.value == "{":
+        if self.check("{", lexer.token_type.punctuator):
             return self.parse_block()
 
         # 空敘述 ; 在 C 中是合法 statement，例如 if (x); 或 while (x);
-        if token.type == lexer.token_type.punctuator and token.value == ";":
+        if self.check(";", lexer.token_type.punctuator):
             self.advance()
             return EmptyStmt(token.line)
 
@@ -286,11 +298,11 @@ class parser:
         return expr
 
     def parse(self):
-        """解析所有語句，每個語句的 AST 依序存入 self.statements 並回傳該 list。"""
+        """解析所有語句，每個語句的 AST 依序存入 self.program 並回傳該 list。"""
         while not self.is_at_end():
             stmt = self.parse_statement()
-            self.statements.append(stmt)
-        return self.statements
+            self.program.append(stmt)
+        return self.program
 
     def parse_expression(self):
         """運算式入口，目前最低層級是指定運算。"""
@@ -373,6 +385,8 @@ class parser:
         while True:
             paren_token = self.match("(", lexer.token_type.punctuator)
             if paren_token:
+                if not isinstance(expr, Identifier):
+                    self.error("Syntax error: Function call must be applied to an identifier", paren_token)
                 args = []
                 if not self.check(")", lexer.token_type.punctuator):
                     # 參數本身也是完整 expression，所以可包含指定與所有二元運算。
@@ -484,6 +498,39 @@ class parser:
         self.expect(")", lexer.token_type.punctuator)
         self.expect(";", lexer.token_type.punctuator)
         return DoWhileStmt(body, condition)
+
+    def parse_for_statement(self):
+        """解析 for (init; condition; update) body"""
+        self.advance() # 吃掉 'for'
+        self.expect("(", lexer.token_type.punctuator)
+
+        init = None
+        if self.check(";", lexer.token_type.punctuator):
+            self.advance()
+        elif self.current_token is not None and self.current_token.type == lexer.token_type.keyword and self.current_token.value in ["int", "char"]:
+            # for 的 init 可是變數宣告；parse_statement 會一併吃掉結尾分號。
+            init = self.parse_statement()
+        # 否則 init 是一般的 expression，結尾分號要自己吃掉。
+        else:
+            init = self.parse_expression()
+            self.expect(";", lexer.token_type.punctuator)
+
+        condition = None
+        if not self.check(";", lexer.token_type.punctuator):
+            condition = self.parse_expression()
+        self.expect(";", lexer.token_type.punctuator)
+
+        update = None
+        if not self.check(")", lexer.token_type.punctuator):
+            update = self.parse_expression()
+        self.expect(")", lexer.token_type.punctuator)
+
+        self.loop_depth += 1
+        try:
+            body = self.parse_statement_or_block()
+        finally:
+            self.loop_depth -= 1
+        return ForStmt(init, condition, update, body)
 
     def parse_break_statement(self):
         """解析 break;"""
