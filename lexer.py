@@ -122,13 +122,13 @@ class lexer:
                 self.macro_definitions[macro_name] = macro_value_str
     def _read_operator(self):
         cur_token = self._current_char()
-        oprator = cur_token
+        operator = cur_token
         self.position+=1
         # 若可組成雙字元運算子則一併吃掉下一字元
         if (self.position < len(self.codes) and self.codes[self.position-1:self.position+1] in operators_2):
-            oprator += self.codes[self.position]
+            operator += self.codes[self.position]
             self.position+=1
-        self._add_token(token_type.operator,oprator)
+        self._add_token(token_type.operator,operator)
     def _read_identifier_or_keyword(self):
         cur_token = self._current_char()
         ident=cur_token
