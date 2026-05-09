@@ -40,16 +40,6 @@ class Identifier:
         return f"Identifier({self.name})"
 
 
-class Pointer:
-    """指標 AST 節點。"""
-
-    def __init__(self, dtype, value, line):
-        self.dtype = dtype
-        self.value = value
-        self.line = line
-    def __repr__(self):
-        return f"Pointer({self.dtype}, {self.value})"
-
 
 class BinaryExpr:
     """二元運算 AST 節點，例如 +、*、==、&&、|。"""
@@ -117,12 +107,6 @@ class VarDecl:
 
     def __repr__(self):
         return f"VarDecl({self.var_type}, {self.name}, {self.init_expr})"
-# class TypeSpec:
-#     """型別描述 AST 節點，例如 int、char*、void。"""
-
-#     def __init__(self, base_type: str, pointer_level: int = 0):
-#         self.base_type = base_type
-#         self.pointer_level = pointer_level
 
 class Block:
     """區塊 AST 節點，代表由 { } 包起來的多個語句。"""
@@ -140,6 +124,43 @@ class IfStmt:
     def __repr__(self):
         return f"IfStmt({self.condition}, {self.then_branch}, {self.else_branch})"
 
+class WhileStmt:
+    """While 迴圈 AST 節點。"""
+    def __init__(self, condition, body):
+        self.condition = condition
+        self.body = body
+    def __repr__(self):
+        return f"WhileStmt({self.condition}, {self.body})"
+
+class DoWhileStmt:
+    """Do-while 迴圈 AST 節點。"""
+    def __init__(self, body, condition):
+        self.body = body
+        self.condition = condition
+    def __repr__(self):
+        return f"DoWhileStmt({self.body}, {self.condition})"
+
+class BreakStmt:
+    """Break 敘述 AST 節點。"""
+    def __init__(self, line):
+        self.line = line
+    def __repr__(self):
+        return "BreakStmt()"
+
+class ContinueStmt:
+    """Continue 敘述 AST 節點。"""
+    def __init__(self, line):
+        self.line = line
+    def __repr__(self):
+        return "ContinueStmt()"
+
+class EmptyStmt:
+    """空敘述 AST 節點，代表單獨的分號 ;。"""
+    def __init__(self, line):
+        self.line = line
+    def __repr__(self):
+        return "EmptyStmt()"
+
 class parser:
     """遞迴下降語法分析器，依照運算子優先權把 token 串轉成 AST。"""
 
@@ -150,6 +171,7 @@ class parser:
         self.position: int = 0
         self.current_token: lexer.token = self.peek()
         self.statements = []  # 用來存放多行程式碼的 AST，讓 REPL 可以一次執行整段程式碼
+        self.loop_depth: int = 0
 
     def peek(self, offset=0):
         """查看目前 token 或往後 offset 個位置的 token，但不改變 parser 狀態。"""
@@ -212,19 +234,35 @@ class parser:
         if token is None:
             return None
 
-        # 1. 處理 If 敘述
-        if token.type == lexer.token_type.keyword and token.value == "if":
+        # 1. 處理控制流程敘述
+        if self.check("if", lexer.token_type.keyword):
             return self.parse_if_statement()
+        if self.check("while", lexer.token_type.keyword):
+            return self.parse_while_statement()
+        if self.check("do", lexer.token_type.keyword):
+            return self.parse_do_while_statement()
+        if self.check("break", lexer.token_type.keyword):
+            return self.parse_break_statement()
+        if self.check("continue", lexer.token_type.keyword):
+            return self.parse_continue_statement()
 
         # 2. 處理獨立的區塊 { ... }
         if token.type == lexer.token_type.punctuator and token.value == "{":
             return self.parse_block()
 
-        # 3. 處理變數宣告 (int, char)
+        # 空敘述 ; 在 C 中是合法 statement，例如 if (x); 或 while (x);
+        if token.type == lexer.token_type.punctuator and token.value == ";":
+            self.advance()
+            return EmptyStmt(token.line)
+
+        # 3. 處理變數宣告 (int, char, int*, char*)
         if token.type == lexer.token_type.keyword and token.value in ["int", "char"]:
             var_type = token.value
             line = token.line
             self.advance() # 吃掉型別關鍵字
+            # C 語言中，變數宣告可以有指標，例如 int* p; 或 char* s;，所以這裡檢查是否有接著 * 號來決定型別是 int 還是 int*。
+            if self.match("*", lexer.token_type.operator): 
+                var_type += "*"
 
             name_token = self.current_token
             if name_token is None or name_token.type != lexer.token_type.identifier:
@@ -413,13 +451,61 @@ class parser:
         # 如果有 else，繼續解析
         if self.match("else", lexer.token_type.keyword):
             else_branch = self.parse_statement_or_block()
-            
+
         return IfStmt(condition, then_branch, else_branch)
+
+    def parse_while_statement(self):
+        """解析 while (cond) { ... }"""
+        self.advance() # 吃掉 'while'
+        self.expect("(", lexer.token_type.punctuator)
+        condition = self.parse_expression()
+        self.expect(")", lexer.token_type.punctuator)
+
+        self.loop_depth += 1
+        try:
+            body = self.parse_statement_or_block()
+        finally:
+            self.loop_depth -= 1
+        return WhileStmt(condition, body)
+
+    def parse_do_while_statement(self):
+        """解析 do { ... } while (cond);"""
+        self.advance() # 吃掉 'do'
+
+        self.loop_depth += 1
+        try:
+            body = self.parse_statement_or_block()
+        finally:
+            self.loop_depth -= 1
+
+        self.expect("while", lexer.token_type.keyword)
+        self.expect("(", lexer.token_type.punctuator)
+        condition = self.parse_expression()
+        self.expect(")", lexer.token_type.punctuator)
+        self.expect(";", lexer.token_type.punctuator)
+        return DoWhileStmt(body, condition)
+
+    def parse_break_statement(self):
+        """解析 break;"""
+        if self.loop_depth == 0:
+            self.error("'break' statement is only allowed inside a loop")
+        token = self.advance() # 吃掉 'break'
+        self.expect(";", lexer.token_type.punctuator)
+        return BreakStmt(token.line)
+
+    def parse_continue_statement(self):
+        """解析 continue;"""
+        if self.loop_depth == 0:
+            self.error("'continue' statement is only allowed inside a loop")
+        token = self.advance() # 吃掉 'continue'
+        self.expect(";", lexer.token_type.punctuator)
+        return ContinueStmt(token.line)
 
     def parse_statement_or_block(self):
         """輔助函式：判斷接下來是 { 區塊，還是單行語句"""
+        if self.is_at_end():
+            self.error("Expected statement")
         if self.check("{", lexer.token_type.punctuator):
             return self.parse_block()
         else:
             return self.parse_statement()
-    
