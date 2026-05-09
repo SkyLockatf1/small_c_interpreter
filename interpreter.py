@@ -155,7 +155,7 @@ class Interpreter:
             if isinstance(right_val, str):
                 right_val = ord(right_val) # 允許 char 以 int 形式參與運算
             if ast_node.operator == "+":
-                # 算術運算只接受整數值。
+                # 這裡對每個運算子都檢查左右兩邊的值是否為 int（或 char 以 int 形式），確保類型正確才進行運算，否則丟出錯誤訊息。
                 if not isinstance(left_val, (int)) or not isinstance(right_val, (int)):
                     raise Exception(f"Runtime error: Cannot apply operator '+' to {type_mapping[type(left_val).__name__]} and {type_mapping[type(right_val).__name__]} at line {ast_node.line}.")
                 return left_val + right_val
@@ -225,10 +225,13 @@ class Interpreter:
                 return 1 if left_val >= right_val else 0
         elif isinstance(ast_node,parser.CallExpr):
             # 函式呼叫會先求出所有參數，再分流到內建函式或使用者自訂函式。
-            print("func call:", ast_node.fn, "args:", ast_node.args)
-            function_name = ast_node.fn.name
+            """目前只實作內建函式的呼叫邏輯，使用 Python 的 getattr 從 c_builtins 模組找到對應函式並呼叫。
+            之後要實作 user-defined 函式的呼叫邏輯，從符號表查函式定義，建立新的執行環境，執行函式體等。
+            缺少對參數類型與數量的檢查，以及對 return 值的處理，目前先假設內建函式都能正確被呼叫，且 user-defined 函式的呼叫邏輯尚未實作。"""
             if not isinstance(ast_node.fn, parser.Identifier):
                 raise Exception(f"Runtime error: Function name must be an identifier at line {ast_node.line}.")
+            print("func call:", ast_node.fn, "args:", ast_node.args)
+            function_name = ast_node.fn.name
             args = []
             return_value = None
             for arg in ast_node.args:
@@ -342,6 +345,21 @@ class Interpreter:
                     break
                 if self.evaluate(ast_node.condition) == 0:
                     break
+            return None
+        elif isinstance(ast_node, parser.ForStmt):
+            if ast_node.init is not None:
+                self.evaluate(ast_node.init)
+            while True:
+                if ast_node.condition is not None and self.evaluate(ast_node.condition) == 0:
+                    break
+                try:
+                    self.evaluate(ast_node.body)
+                except ContinueSignal:
+                    pass
+                except BreakSignal:
+                    break
+                if ast_node.update is not None:
+                    self.evaluate(ast_node.update)
             return None
         elif isinstance(ast_node, parser.BreakStmt):
             # 交給外層最近的迴圈處理。
