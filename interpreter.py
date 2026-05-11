@@ -16,6 +16,7 @@ type_mapping = {
     'int': 'int',
     'char_ptr': 'char*',
     'int_ptr': 'int*',
+    'array': 'array',
     'None': 'void',
 }
 # 用 importlib 按路徑載入本地 builtins.py，
@@ -240,7 +241,17 @@ class Interpreter:
             return return_value
         elif isinstance(ast_node, parser.VarDecl):
             # 1. 計算所需記憶體大小並配置空間
-            size = 4 if ast_node.var_type == "int" else 1
+            size = 0
+            if ast_node.var_type == "int":
+                size = 4
+            elif ast_node.var_type == "char":
+                size = 1
+            elif ast_node.var_type == "char*":
+                size = 4 # 在 32 位元環境中，指標大小為 4 bytes
+            elif ast_node.var_type == "int*":
+                size = 4 # 在 32 位元環境中，指標大小為 4 bytes
+            else:
+                raise Exception(f"Runtime error: Unsupported variable type {ast_node.var_type} for variable '{ast_node.name}' at line {ast_node.line}.")
             addr = self.memory.alloc_global(size)
             
             # 2. 註冊進符號表
