@@ -54,9 +54,6 @@ def printf(vm: VirtualMemory, fmt: char_ptr, *args) -> None:
                     raise Exception("Runtime error: printf argument missing")
                 if type(args[arg_index]) is int:
                     result += str(args[arg_index])
-                elif type(args[arg_index]) is str and len(args[arg_index]) == 1: # 允許 char 以 int 形式輸出
-                    # char 在此直譯器中可能以長度為 1 的字串表示。
-                    result += str(ord(args[arg_index]))
                 else:
                     got_type = type_mapping.get(type(args[arg_index]).__name__, type(args[arg_index]).__name__)
                     raise Exception(f"Runtime error: printf expects int or hex for %d, got {got_type}")
@@ -82,13 +79,13 @@ def printf(vm: VirtualMemory, fmt: char_ptr, *args) -> None:
                 if arg_index >= len(args):
                     raise Exception("Runtime error: printf argument missing")
                 value = args[arg_index]
-                if type(value) is int:
-                    result += chr(value)
-                elif type(value) is str and len(value) == 1:
-                    result += value
+                if type(value) is int and 0 <= value <= 127:
+                    result += chr(value) # %c 僅支援 ASCII 字元碼 0..127。
+                elif type(value) is int and (value < 0 or value > 127):
+                    raise Exception(f"Runtime error: printf %c expects ASCII code 0..127, got {value}")
                 else:
                     got_type = type_mapping.get(type(value).__name__, type(value).__name__)
-                    raise Exception(f"Runtime error: printf expects char for %c, got {got_type}")
+                    raise Exception(f"Runtime error: printf %c expects int ASCII code 0..127, got {got_type}")
                 arg_index += 1
                 i += 2
             elif specifier == 'x':
@@ -114,6 +111,11 @@ def printf(vm: VirtualMemory, fmt: char_ptr, *args) -> None:
 
 #int putchar(int ch);
 def putchar(ch:int)-> int:
+    if type(ch) is not int:
+        got_type = type_mapping.get(type(ch).__name__, type(ch).__name__)
+        raise Exception(f"Runtime error: putchar expects int ASCII code 0..127, got {got_type}")
+    if ch < 0 or ch > 127:
+        raise Exception(f"Runtime error: putchar expects ASCII code 0..127, got {ch}")
     print(chr(ch), end='')
     return ch
 #int getchar();

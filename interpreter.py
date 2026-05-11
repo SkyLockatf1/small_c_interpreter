@@ -4,7 +4,7 @@ import inspect
 import parser
 import memory
 import symtable as symtable
-from extra_c_type import char_ptr, int_ptr
+from extra_c_type import char_ptr, int_ptr,array
 """C-like 直譯器核心。
 
 這個模組負責把 parser 產生的 AST 逐步求值，並透過虛擬記憶體與符號表
@@ -13,7 +13,6 @@ from extra_c_type import char_ptr, int_ptr
 
 # 將 Python 執行時的型別名稱轉成錯誤訊息中較接近 C 語言的型別名稱。
 type_mapping = {
-    'str': 'char',
     'int': 'int',
     'char_ptr': 'char*',
     'int_ptr': 'int*',
@@ -53,6 +52,7 @@ class Interpreter:
         # 保存目前執行環境的虛擬記憶體與符號表，後續求值時會用來查變數、地址與函式。
         self.memory: memory.VirtualMemory = memory.VirtualMemory()
         self.symtable: symtable.symtable = symtable.symtable()
+        self.randseed = None # 之後實作 rand() 時會用到
 
     def evaluate(self, ast_node) -> object:
         # 根據 AST 節點型別遞迴求值，回傳此節點在目前執行環境中的值。
@@ -60,31 +60,25 @@ class Interpreter:
             # 數字常數直接回傳原值，不需要額外查表。
             return ast_node.value
         elif isinstance(ast_node, parser.Char):
-            # 字元常數在 AST 中已經是單一值，直接回傳。
-            return ast_node.value 
+            # 字元常數在 AST 中已經是單一值，直接回傳其 ASCII 值。
+            return ord(ast_node.value)
         elif isinstance(ast_node, parser.String):
             # 字串常數先配置到虛擬記憶體，再回傳起始位址。
-            return char_ptr(self.memory.set_string(ast_node.value), len(ast_node.value)+1) #放進記憶體並回傳地址 （包含結尾的 \0 字元）
+            return array(self.memory.set_string(ast_node.value), len(ast_node.value)+1, 'char') #放進記憶體並回傳地址 （包含結尾的 \0 字元）
         elif isinstance(ast_node, parser.UnaryExpr):
             # 一元運算依 operator 決定是否需要先取 operand 的值。
             if ast_node.operator == "-":
                 val = self.evaluate(ast_node.operand)
-                if isinstance(val, str):
-                    val = ord(val) # 允許 char 以 int 形式參與運算
                 if not isinstance(val, (int)):
                     raise Exception(f"Runtime error: Cannot apply unary '-' to {type_mapping[type(val).__name__]} at line {ast_node.line}.")
                 return -val
             elif ast_node.operator == "!":
                 val = self.evaluate(ast_node.operand)
-                if isinstance(val, str):
-                    val = ord(val) # 允許 char 以 int 形式參與運算
                 if not isinstance(val, (int)):
                     raise Exception(f"Runtime error: Cannot apply unary '!' to {type_mapping[type(val).__name__]} at line {ast_node.line}.")
                 return int(not val)
             elif ast_node.operator == "~":
                 val = self.evaluate(ast_node.operand)
-                if isinstance(val, str):
-                    val = ord(val) # 允許 char 以 int 形式參與運算
                 if not isinstance(val, (int)):
                     raise Exception(f"Runtime error: Cannot apply unary '~' to {type_mapping[type(val).__name__]} at line {ast_node.line}.")
                 return ~val
@@ -126,16 +120,12 @@ class Interpreter:
             # 二元運算採延遲求值：先求左子表達式，
             # 對於 && / || 採短路（必要時才求右子表達式），其餘運算再求右子表達式。
             left_val = self.evaluate(ast_node.left)
-            if isinstance(left_val, str):
-                left_val = ord(left_val) # 允許 char 以 int 形式參與運算
             if ast_node.operator == "&&":
                 if not isinstance(left_val, (int)):
                     raise Exception(f"Runtime error: Cannot apply operator '&&' to {type_mapping[type(left_val).__name__]} and <right> at line {ast_node.line}.")
                 if not left_val:
                     return 0
                 right_val = self.evaluate(ast_node.right)
-                if isinstance(right_val, str):
-                    right_val = ord(right_val) # 允許 char 以 int 形式參與運算
                 if not isinstance(right_val, (int)):
                     raise Exception(f"Runtime error: Cannot apply operator '&&' to {type_mapping[type(left_val).__name__]} and {type_mapping[type(right_val).__name__]} at line {ast_node.line}.")
                 return 1 if left_val and right_val else 0
@@ -145,15 +135,11 @@ class Interpreter:
                 if left_val:
                     return 1
                 right_val = self.evaluate(ast_node.right)
-                if isinstance(right_val, str):
-                    right_val = ord(right_val) # 允許 char 以 int 形式參與運算
                 if not isinstance(right_val, (int)):
                     raise Exception(f"Runtime error: Cannot apply operator '||' to {type_mapping[type(left_val).__name__]} and {type_mapping[type(right_val).__name__]} at line {ast_node.line}.")
                 return 1 if left_val or right_val else 0
             # 非短路運算再求右子表達式
             right_val = self.evaluate(ast_node.right)
-            if isinstance(right_val, str):
-                right_val = ord(right_val) # 允許 char 以 int 形式參與運算
             if ast_node.operator == "+":
                 # 這裡對每個運算子都檢查左右兩邊的值是否為 int（或 char 以 int 形式），確保類型正確才進行運算，否則丟出錯誤訊息。
                 if not isinstance(left_val, (int)) or not isinstance(right_val, (int)):
@@ -236,6 +222,14 @@ class Interpreter:
             return_value = None
             for arg in ast_node.args:
                 args.append(self.evaluate(arg))
+                if isinstance(args[-1], array):
+                    # 如果參數是字串常數，將其轉換成 char_ptr 傳給內建函式。
+                    if args[-1].elem_type == 'char':
+                        args[-1] = char_ptr(args[-1].addr, args[-1].length)
+                    elif args[-1].elem_type == 'int':
+                        args[-1] = int_ptr(args[-1].addr)
+                    else:
+                        raise Exception(f"Runtime error: Unsupported array element type {args[-1].elem_type} for argument at line {ast_node.line}.")
             if function_name in builtins_funcs:
                 if function_name in str_funcs:
                     return_value = getattr(c_builtins,function_name)(self.memory,*args)
@@ -255,13 +249,9 @@ class Interpreter:
             # 3. 如果有給初始值，算出來並寫入記憶體
             if ast_node.init_expr:
                 val = self.evaluate(ast_node.init_expr)
-                if ast_node.var_type == "int" and isinstance(val, (int,str)):
-                    if(isinstance(val, str)):
-                        val = ord(val) # 允許 char 以 int 形式初始化 int 變數
+                if ast_node.var_type == "int" and isinstance(val, (int)):
                     self.memory.set_int(addr, val)
-                elif ast_node.var_type == "char" and isinstance(val, (int,str)):
-                    if isinstance(val, int):
-                        val = chr(val) # 允許 int 以 char 形式初始化 char 變數
+                elif ast_node.var_type == "char" and isinstance(val, (int)):
                     self.memory.set_char(addr, val)
                 else:
                     raise Exception(f"Runtime error: Cannot initialize variable '{ast_node.name}' of type {ast_node.var_type} with value of type {type_mapping[type(val).__name__]} at line {ast_node.line}.")
@@ -272,7 +262,7 @@ class Interpreter:
             if var_info['type'] == 'int':
                 return self.memory.get_int(var_info['addr'])
             elif var_info['type'] == 'char':
-                return chr(self.memory.get_char(var_info['addr']))
+                return self.memory.get_char(var_info['addr'])
             else:
                 raise Exception(f"Runtime error: Unsupported variable type {var_info['type']} for variable '{ast_node.name}' at line {ast_node.line}.")
         elif isinstance(ast_node, parser.AssignmentExpr):
