@@ -97,15 +97,30 @@ class IndexExpr:
     def __repr__(self):
         return f"IndexExpr({self.base}, {self.index})"
 
-class VarDecl:
-    """變數宣告 AST 節點，例如 int x = 10; 或 int z;"""
-    def __init__(self, var_type: str, name: str, init_expr, line: int):
-        self.var_type = var_type   # "int" 或 "char"
-        self.name = name           # 變數名稱
-        self.init_expr = init_expr # 初始值運算式 (若無則為 None)
+class InitList:
+    """初始化列表 AST 節點，例如 {1, 2, 3}。"""
+
+    def __init__(self, values: list, line):
+        self.values = values
         self.line = line
 
     def __repr__(self):
+        return f"InitList({self.values})"
+
+class VarDecl:
+    """變數宣告 AST 節點，例如 int x = 10;、int z; 或 int a[3] = {1, 2, 3};"""
+    def __init__(self, var_type: str, name: str, init_expr, line: int, is_array=False, array_size=None):
+        self.var_type = var_type   # "int" / "char" / "int*" / "char*"
+        self.name = name           # 變數名稱
+        self.init_expr = init_expr # 初始值運算式 (若無則為 None)
+        self.line = line
+        self.is_array = is_array # 是否為陣列宣告
+        self.array_size = array_size # 明確指定的陣列大小；int a[] = {1, 2} 會保留 None，交由後續階段推導。
+
+    def __repr__(self):
+        if self.is_array:
+            size = "" if self.array_size is None else self.array_size
+            return f"VarDecl({self.var_type}, {self.name}[{size}], {self.init_expr})"
         return f"VarDecl({self.var_type}, {self.name}, {self.init_expr})"
 
 class Block:
@@ -269,25 +284,7 @@ class parser:
 
         # 3. 處理變數宣告 (int, char, int*, char*)
         if token.type == lexer.token_type.keyword and token.value in ["int", "char"]:
-            var_type = token.value
-            line = token.line
-            self.advance() # 吃掉型別關鍵字
-            # C 語言中，變數宣告可以有指標，例如 int* p; 或 char* s;，所以這裡檢查是否有接著 * 號來決定型別是 int 還是 int*。
-            if self.match("*", lexer.token_type.operator): 
-                var_type += "*"
-
-            name_token = self.current_token
-            if name_token is None or name_token.type != lexer.token_type.identifier:
-                self.error("Expected variable name")
-            name = name_token.value
-            self.advance() # 吃掉變數名稱
-
-            init_expr = None
-            if self.match("=", lexer.token_type.operator):
-                init_expr = self.parse_expression()
-
-            self.expect(";", lexer.token_type.punctuator)
-            return VarDecl(var_type, name, init_expr, line)
+            return self.parse_var_decl()
 
         # 4. 若都不是以上情況，則視為運算式語句 (Expression Statement)
         expr = self.parse_expression()
@@ -303,6 +300,96 @@ class parser:
             stmt = self.parse_statement()
             self.program.append(stmt)
         return self.program
+
+    def parse_var_decl(self):
+        """解析變數或陣列宣告，支援 int a;、int a[3];、int a[] = {1, 2, 3};。"""
+        # 宣告格式固定從型別開始，例如 int x;、char c;、int* p;。
+        type_token = self.current_token
+        var_type = type_token.value
+        line = type_token.line
+        self.advance() # 吃掉型別關鍵字
+
+        # C 語言中，變數宣告可以有指標，例如 int* p; 或 char* s;。
+        if self.match("*", lexer.token_type.operator):
+            var_type += "*"
+
+        name_token = self.current_token
+        if name_token is None or name_token.type != lexer.token_type.identifier:
+            self.error("Expected variable name")
+        name = name_token.value
+        self.advance() # 吃掉變數名稱
+
+        # 變數名稱後若接 [] 或 [size]，代表這是陣列宣告。
+        # 目前 size 只允許十進位整數常數，避免在 parser 階段求值 expression。
+        is_array = False
+        array_size = None
+        if self.match("[", lexer.token_type.punctuator):
+            is_array = True
+            if self.check("]", lexer.token_type.punctuator):
+                self.advance()
+            else:
+                size_token = self.current_token
+                if size_token is None or size_token.type != lexer.token_type.number:
+                    self.error("Expected decimal array size")
+                array_size = int(size_token.value)
+                if array_size <= 0:
+                    self.error("Array size must be greater than 0", size_token)
+                self.advance()
+                self.expect("]", lexer.token_type.punctuator)
+
+        # 一般變數用 expression 初始化；陣列可以用 { ... } 初始化列表。
+        init_expr = None
+        if self.match("=", lexer.token_type.operator):
+            if self.check("{", lexer.token_type.punctuator):
+                init_expr = self.parse_init_list()
+            else:
+                init_expr = self.parse_expression()
+
+        if is_array:
+            # 陣列定義支援初始化列表；char 陣列也支援字串常數初始化。
+            if isinstance(init_expr, String):
+                # C 中只有 char 陣列能用字串常數初始化，例如 char s[] = "abc"。
+                if var_type != "char":
+                    self.error("String initializer is only valid for char arrays")
+                # 顯式大小可剛好容納字串內容；若要保留結尾 \0，使用者需多留一格。
+                if array_size is not None and len(init_expr.value) > array_size:
+                    self.error("String initializer is larger than array size")
+                if array_size is None:
+                    # char s[] = "abc" 會推導成 4，包含字串結尾的 \0。
+                    array_size = len(init_expr.value) + 1
+            # 除了字串常數以外的陣列初始化都必須是初始化列表，例如 int a[3] = {1, 2, 3}；不允許 int a[3] = 1。
+            elif init_expr is not None and not isinstance(init_expr, InitList):
+                self.error("Array initializer must be an initializer list")
+            # int a[]; 無法從語法資訊得知大小，因此要求必須提供初始化列表。
+            if array_size is None and init_expr is None:
+                self.error("Array declaration with [] requires an initializer")
+            # int a[] = {}; 也無法推導出合法大小。
+            if array_size is None and isinstance(init_expr, InitList) and len(init_expr.values) == 0:
+                self.error("Array declaration with [] requires a non-empty initializer list")
+            if array_size is not None and isinstance(init_expr, InitList) and len(init_expr.values) > array_size:
+                self.error("Array initializer has more values than array size")
+            if array_size is None and isinstance(init_expr, InitList):
+                # int a[] = {1, 2, 3} 直接由初始化列表長度推導大小。
+                array_size = len(init_expr.values)
+
+        self.expect(";", lexer.token_type.punctuator)
+        return VarDecl(var_type, name, init_expr, line, is_array, array_size)
+
+    def parse_init_list(self):
+        """解析初始化列表 { expr, expr, ... }，不允許尾端逗號。"""
+        brace_token = self.expect("{", lexer.token_type.punctuator)
+        values = []
+
+        if not self.check("}", lexer.token_type.punctuator):
+            while True:
+                values.append(self.parse_expression())
+                if self.match(",", lexer.token_type.punctuator) is None:
+                    break
+                if self.check("}", lexer.token_type.punctuator):
+                    self.error("Trailing comma is not allowed in initializer list")
+
+        self.expect("}", lexer.token_type.punctuator)
+        return InitList(values, brace_token.line)
 
     def parse_expression(self):
         """運算式入口，目前最低層級是指定運算。"""
