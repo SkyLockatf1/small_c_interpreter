@@ -170,7 +170,7 @@ def sizeof_int()-> int:
 def sizeof_char()-> int:
     return 1
 
-def atio(char_str: str)-> int:
+def atoi(char_str: str)-> int:
     return int(char_str)
 
 #void strcpy(char *dest, char *src);
