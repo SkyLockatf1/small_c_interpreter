@@ -8,26 +8,46 @@ import repl
 RE_SINGLE = r'^(\d+)$'
 RE_RANGE = r'^(\d+)-(\d+)$'
 
-def handle_list(buffer: list, args: str):
+def parse_line_args(args: str, command: str, allow_empty: bool, allow_range: bool) -> list[int]:
+    # 根據 allow_empty 和 allow_range 來決定允許的參數格式，並在錯誤訊息中清楚說明。
+    if allow_empty and allow_range:
+        usage = "'n' or 'n1-n2' or without arguments"
+    elif allow_range:
+        usage = "'n' or 'n1-n2'"
+    else:
+        usage = "'n'"
 
     # 使用 fullmatch 進行嚴格檢查
     m_single = re.fullmatch(RE_SINGLE, args)
     m_range = re.fullmatch(RE_RANGE, args)
 
     if not args: #沒參數
-        n = []
+        if allow_empty:
+            return []
+        raise Exception(f"Runtime error: Invalid format '{args}'. Use {usage} for {command}.")
 
     elif m_single:  #單參數
         n1 = int(m_single.group(1))
-        n = [n1]
+        return [n1]
 
-    elif m_range: #範圍參數
+    elif m_range and allow_range: #範圍參數
         n1, n2 = int(m_range.group(1)), int(m_range.group(2))
-        n = [n1, n2]
-    else:
-        # 只要不是以上兩種格式，就報錯（包含 1,5 或 1 5）
-        raise Exception(f"Runtime error: Invalid format '{args}'. Use 'n' or 'n1-n2' or without arguments.")
+        return [n1, n2]
+
+    # 只要不是允許的格式，就報錯（包含 1,5 或 1 5）
+    raise Exception(f"Runtime error: Invalid format '{args}'. Use {usage} for {command}.")
+
+def handle_list(buffer: list, args: str):
+    n = parse_line_args(args, "LIST", allow_empty=True, allow_range=True)
     repl.LIST(buffer, n)
+
+def handle_delete(buffer: list, args: str):
+    n = parse_line_args(args, "DELETE", allow_empty=False, allow_range=True)
+    repl.DELETE(buffer, n)
+
+def handle_insert(buffer: list, args: str):
+    n = parse_line_args(args, "INSERT", allow_empty=False, allow_range=False)
+    repl.INSERT(buffer, n[0])
  
 def check_input_complete(pending_buffer: str) -> bool:
     """只判斷 REPL 是否還需要續行；語法錯誤交給 lexer/parser 處理。"""
@@ -144,6 +164,10 @@ if __name__ == "__main__":
                 repl.HELP()
             elif cmd == "LIST":
                 handle_list(buffer, args)
+            elif cmd == "DELETE":
+                handle_delete(buffer, args)
+            elif cmd == "INSERT":
+                handle_insert(buffer, args)
             elif cmd == "EDIT":
                 m_single = re.fullmatch(RE_SINGLE, args)
                 if m_single:
