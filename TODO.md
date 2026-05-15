@@ -540,29 +540,6 @@ Semester: Spring 2026
 
 ---
 
-### TODO 19：修正 `LIST` 輸出格式
-
-目前格式接近：
-
-```text
-[1]: code
-```
-
-建議改成驗收腳本較常見的格式：
-
-```text
-   1: code
-   2: code
-```
-
-#### 需要完成
-
-- `LIST`
-- `LIST n`
-- `LIST n1-n2`
-- 空白行也要正確列出。
-
----
 
 ### TODO 20：修正 `APPEND` / `INSERT` 輸入提示
 

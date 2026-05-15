@@ -123,6 +123,42 @@ class VarDecl:
             return f"VarDecl({self.var_type}, {self.name}[{size}], {self.init_expr})"
         return f"VarDecl({self.var_type}, {self.name}, {self.init_expr})"
 
+class Param:
+    """函式參數 AST 節點。
+
+    param_type 使用和 VarDecl 相同的型別字串，例如 "int"、"char*"。
+    陣列參數會保留 is_array / array_size，方便 interpreter 後續決定是否
+    轉成指標語意。
+    """
+    def __init__(self, param_type: str, name: str, line: int, is_array=False, array_size=None):
+        self.param_type = param_type
+        self.name = name
+        self.line = line
+        self.is_array = is_array
+        self.array_size = array_size
+
+    def __repr__(self):
+        if self.is_array:
+            size = "" if self.array_size is None else self.array_size
+            return f"Param({self.param_type}, {self.name}[{size}])"
+        return f"Param({self.param_type}, {self.name})"
+
+class FunctionDef:
+    """函式定義 AST 節點。
+
+    Small-C 不支援向前宣告，因此 parser 只建立 FunctionDef，
+    不另外建立 FunctionDecl / Prototype 類型。
+    """
+    def __init__(self, return_type: str, name: str, params: list, body, line: int):
+        self.return_type = return_type
+        self.name = name
+        self.params = params
+        self.body = body
+        self.line = line
+
+    def __repr__(self):
+        return f"FunctionDef({self.return_type}, {self.name}, {self.params}, {self.body})"
+
 class Block:
     """區塊 AST 節點，代表由 { } 包起來的多個語句。"""
     def __init__(self, statements: list):
@@ -252,8 +288,88 @@ class parser:
             return self.advance()
         return None
 
+    def is_function_definition_start(self):
+        """判斷目前位置是否看起來像函式定義的開頭。
+
+        只用 lookahead，不消耗 token。符合以下形狀時回傳 True：
+        int/char/void identifier (
+        int*/char* identifier (
+        """
+        token = self.current_token
+        if token is None or token.type != lexer.token_type.keyword or token.value not in ["int", "char", "void"]:
+            return False
+
+        # 回傳型別後面可以接一個 *，表示 int* / char* 回傳型別。
+        offset = 1
+        next_token = self.peek(offset)
+        if next_token is not None and next_token.type == lexer.token_type.operator and next_token.value == "*":
+            offset += 1
+
+        name_token = self.peek(offset)
+        paren_token = self.peek(offset + 1)
+        return (
+            name_token is not None
+            and name_token.type == lexer.token_type.identifier
+            and paren_token is not None
+            and paren_token.type == lexer.token_type.punctuator
+            and paren_token.value == "("
+        )
+
+    def parse_type_spec(self, allow_void=False, context="type"):
+        """解析型別名稱，並支援 int* / char*。
+
+        allow_void 只應在解析函式回傳型別時設為 True。
+        依目前規格，void 不能作為變數或參數型別，也不支援 void*。
+        """
+        token = self.current_token
+        allowed = ["int", "char"]
+        if allow_void:
+            allowed.append("void")
+        if token is None or token.type != lexer.token_type.keyword or token.value not in allowed:
+            self.error(f"Expected {context}")
+
+        parsed_type = token.value
+        line = token.line
+        self.advance()
+
+        # Small-C 目前只支援 int* / char*，void* 不在作業規格內。
+        if self.match("*", lexer.token_type.operator):
+            if parsed_type == "void":
+                self.error("void pointer type is not supported")
+            parsed_type += "*"
+
+        return parsed_type, line
+
+    def parse_external_declaration(self):
+        """解析最外層語法單元。
+
+        Small-C 的最外層可以是：
+        - 函式定義：int main() { ... }
+        - 全域變數宣告：int x;
+        - REPL 單行互動輸入沿用的一般 statement
+
+        函式定義不是 statement，所以不要塞進 parse_statement() 當一般語句處理。
+        """
+        token = self.current_token
+        if token is None:
+            return None
+
+        if token.type == lexer.token_type.keyword and token.value in ["int", "char", "void"]:
+            if self.is_function_definition_start():
+                return self.parse_function_def()
+            if token.value == "void":
+                self.error("void is only allowed as a function return type")
+
+        # REPL 模式允許在 top-level 直接輸入 statement，例如 x = 1;。
+        return self.parse_statement()
+
     def parse_statement(self):
-        """解析單一語句（If、區塊、變數宣告或運算式語句），回傳對應 AST 節點。"""
+        """解析一般語句，回傳對應 AST 節點。
+
+        這個入口只處理可出現在區塊內的語法，例如 if、while、區塊、
+        變數宣告與運算式語句。函式定義只能由 parse_external_declaration()
+        在 top-level 解析。
+        """
         token = self.current_token
         
         if token is None:
@@ -283,7 +399,11 @@ class parser:
             return EmptyStmt(token.line)
 
         # 3. 處理變數宣告 (int, char, int*, char*)
-        if token.type == lexer.token_type.keyword and token.value in ["int", "char"]:
+        if token.type == lexer.token_type.keyword and token.value in ["int", "char", "void"]:
+            if self.is_function_definition_start():
+                self.error("Function definitions are only allowed at top level")
+            if token.value == "void":
+                self.error("void is only allowed as a function return type")
             return self.parse_var_decl()
 
         # 4. 若都不是以上情況，則視為運算式語句 (Expression Statement)
@@ -295,11 +415,109 @@ class parser:
         return expr
 
     def parse(self):
-        """解析所有語句，每個語句的 AST 依序存入 self.program 並回傳該 list。"""
+        """解析整份輸入，依序回傳 top-level AST 節點。
+
+        top-level 節點包含函式定義、全域變數宣告，以及 REPL 互動模式允許的
+        單行 statement。
+        """
         while not self.is_at_end():
-            stmt = self.parse_statement()
+            stmt = self.parse_external_declaration()
             self.program.append(stmt)
         return self.program
+
+    def parse_function_def(self):
+        """解析函式定義。
+
+        支援：
+            int main() { ... }
+            char f(int x, char *s, int arr[]) { ... }
+            void log(char msg[]) { ... }
+
+        不支援：
+            int f(int x);   # 向前宣告 / prototype
+        """
+        return_type, line = self.parse_type_spec(allow_void=True, context="function return type")
+
+        # 回傳型別之後必須接函式名稱。
+        name_token = self.current_token
+        if name_token is None or name_token.type != lexer.token_type.identifier:
+            self.error("Expected function name")
+        name = name_token.value
+        self.advance()
+
+        self.expect("(", lexer.token_type.punctuator)
+        params = self.parse_param_list()
+        self.expect(")", lexer.token_type.punctuator)
+
+        # Small-C 不支援 prototype；參數列表後面必須直接接函式本體。
+        if self.check(";", lexer.token_type.punctuator):
+            self.error("Forward function declarations are not supported; expected function body")
+        if not self.check("{", lexer.token_type.punctuator):
+            self.error("Expected function body")
+
+        body = self.parse_block()
+        return FunctionDef(return_type, name, params, body, line)
+
+    def parse_param_list(self):
+        """解析函式參數列表。
+
+        空參數列表使用空 list 表示，例如 main() 或 main(void)。
+        void 只允許單獨出現在參數列表中，代表「沒有參數」。
+        """
+        params = []
+        if self.check(")", lexer.token_type.punctuator):
+            return params
+
+        if self.check("void", lexer.token_type.keyword):
+            void_token = self.advance()
+            if not self.check(")", lexer.token_type.punctuator):
+                self.error("void parameter list must not contain other parameters", void_token)
+            return params
+
+        while True:
+            params.append(self.parse_param())
+            if self.match(",", lexer.token_type.punctuator) is None:
+                break
+            if self.check(")", lexer.token_type.punctuator):
+                self.error("Trailing comma is not allowed in parameter list")
+
+        return params
+
+    def parse_param(self):
+        """解析單一函式參數。
+
+        允許基本型別、指標參數與一維陣列參數：
+            int x
+            char *s
+            int arr[]
+            char buf[8]
+        """
+        param_type, line = self.parse_type_spec(allow_void=False, context="parameter type")
+
+        name_token = self.current_token
+        if name_token is None or name_token.type != lexer.token_type.identifier:
+            self.error("Expected parameter name")
+        name = name_token.value
+        self.advance()
+
+        # 參數只支援一維陣列形式：int a[] 或 int a[10]。
+        is_array = False
+        array_size = None
+        if self.match("[", lexer.token_type.punctuator):
+            is_array = True
+            if self.check("]", lexer.token_type.punctuator):
+                self.advance()
+            else:
+                size_token = self.current_token
+                if size_token is None or size_token.type != lexer.token_type.number:
+                    self.error("Expected decimal array size")
+                array_size = int(size_token.value)
+                if array_size <= 0:
+                    self.error("Array size must be greater than 0", size_token)
+                self.advance()
+                self.expect("]", lexer.token_type.punctuator)
+
+        return Param(param_type, name, line, is_array, array_size)
 
     def parse_var_decl(self):
         """解析變數或陣列宣告，支援 int a;、int a[3];、int a[] = {1, 2, 3};。"""

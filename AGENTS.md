@@ -59,7 +59,7 @@
 - I/O：如 `printf`, `puts`, `getchar`, `putchar`
 - 字串：如 `strlen`, `strcpy`, `strcat`, `strcmp`, `atoi`, `itoa`
 - 數學：如 `abs`, `max`, `min`, `pow`, `sqrt`
-- 工具：如 `rand`, `srand`, `memset`, `sizeof`
+- 工具：如 `rand`, `srand`, `memset`, `sizeof_int/sizeof_char`
 
 內建函式名稱、參數形式與行為應保持一致，不可任意改名。
 
