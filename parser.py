@@ -215,6 +215,14 @@ class ContinueStmt:
     def __repr__(self):
         return "ContinueStmt()"
 
+class ReturnStmt:
+    """Return 敘述 AST 節點，支援 return; 與 return expression;。"""
+    def __init__(self, expr, line):
+        self.expr = expr
+        self.line = line
+    def __repr__(self):
+        return f"ReturnStmt({self.expr})"
+
 class EmptyStmt:
     """空敘述 AST 節點，代表單獨的分號 ;。"""
     def __init__(self, line):
@@ -233,6 +241,7 @@ class parser:
         self.current_token: lexer.token = self.peek()
         self.program = []  # 用來存放多行程式碼的 AST，讓 REPL 可以一次執行整段程式碼
         self.loop_depth: int = 0
+        self.function_depth: int = 0
 
     def peek(self, offset=0):
         """查看目前 token 或往後 offset 個位置的 token，但不改變 parser 狀態。"""
@@ -388,6 +397,8 @@ class parser:
             return self.parse_break_statement()
         if self.check("continue", lexer.token_type.keyword):
             return self.parse_continue_statement()
+        if self.check("return", lexer.token_type.keyword):
+            return self.parse_return_statement()
 
         # 2. 處理獨立的區塊 { ... }
         if self.check("{", lexer.token_type.punctuator):
@@ -455,7 +466,11 @@ class parser:
         if not self.check("{", lexer.token_type.punctuator):
             self.error("Expected function body")
 
-        body = self.parse_block()
+        self.function_depth += 1
+        try:
+            body = self.parse_block()
+        finally:
+            self.function_depth -= 1
         return FunctionDef(return_type, name, params, body, line)
 
     def parse_param_list(self):
@@ -852,6 +867,18 @@ class parser:
         token = self.advance() # 吃掉 'continue'
         self.expect(";", lexer.token_type.punctuator)
         return ContinueStmt(token.line)
+
+    def parse_return_statement(self):
+        """解析 return; 或 return expression;，只能出現在函式本體內。"""
+        if self.function_depth == 0:
+            self.error("'return' statement is only allowed inside a function")
+
+        token = self.advance() # 吃掉 'return'
+        expr = None
+        if not self.check(";", lexer.token_type.punctuator):
+            expr = self.parse_expression()
+        self.expect(";", lexer.token_type.punctuator)
+        return ReturnStmt(expr, token.line)
 
     def parse_statement_or_block(self):
         """輔助函式：判斷接下來是 { 區塊，還是單行語句"""
