@@ -116,17 +116,16 @@ def DELETE(buffer: list[str], args: list[int]) -> None:
 def SAVE(buffer: list[str], filename: str) -> None:
     if len(buffer) == 0:
         raise Exception("REPL error: Program buffer is empty.")
-    else:
-        try:
-            line = len(buffer)
-            with open(filename, "w") as f:
-                    for line in buffer:
-                        if line != buffer[-1]: # 最後一行不加換行符
-                            f.write(line + "\n")
-                        else:
-                            f.write(line)
-            print(f"Saved {len(buffer)} lines to '{filename}'.")
-        except PermissionError:
-            raise Exception(f"REPL error: Permission denied when trying to write to '{filename}'.")
-        except IsADirectoryError:
-            raise Exception(f"REPL error: Invalid filename '{filename}'.")
+    if filename.strip() == "":
+        raise Exception("REPL error: SAVE requires a filename.")
+
+    try:
+        with open(filename, "w", encoding="utf-8") as file:
+            file.write("\n".join(buffer))
+        print(f"Saved {len(buffer)} lines to '{filename}'.")
+    except PermissionError:
+        raise Exception(f"REPL error: Permission denied when trying to write to '{filename}'.")
+    except IsADirectoryError:
+        raise Exception(f"REPL error: Invalid filename '{filename}'.")
+    except OSError as error:
+        raise Exception(f"REPL error: Could not write to '{filename}': {error}")

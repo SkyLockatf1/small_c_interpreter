@@ -1,7 +1,7 @@
 import math
 import random
 from memory import VirtualMemory
-from extra_c_type import char_ptr, int_ptr
+from extra_c_type import char_ptr
 
 type_mapping = {
     'str': 'char',
@@ -12,33 +12,20 @@ type_mapping = {
 }
 
 # void puts(char* str);
-def puts(vm : VirtualMemory, str: char_ptr)-> None:
-    # 從 char_ptr 地址開始，逐字讀取直到遇到 \0
-    offset = 0
-    result = ""
-    while True:
-        vm.check_bounds(str.addr, str.addr + 1, 1) # 確保 char_ptr 是有效地址
-        c = vm.get_char(str.addr + offset)
-        if c == 0:
-            break
-        result += chr(c)
-        offset += 1
-    
-    # 印出字串並自動換行 (Python print 預設就會換行)
-    print(result)
+def puts(vm: VirtualMemory, str: char_ptr) -> None:
+    if type(str) is not char_ptr:
+        got_type = type_mapping.get(type(str).__name__, type(str).__name__)
+        raise Exception(f"Runtime error: puts expects char*, got {got_type}")
+    # read_cstring 處理邊界與 \0 搜尋，puts 自動換行
+    print(vm.read_cstring(str.addr))
 
 # void printf(char* fmt, ...);
 def printf(vm: VirtualMemory, fmt: char_ptr, *args) -> None:
     # 簡化版 printf：支援 %%、%d、%s、%c、%x，並檢查參數數量與型別。
-    format_str = ""
-    offset = 0
-    while True:
-        vm.check_bounds(fmt.addr, fmt.addr + offset, 1)
-        c = vm.get_char(fmt.addr + offset)
-        if c == 0:
-            break
-        format_str += chr(c)
-        offset += 1
+    if type(fmt) is not char_ptr:
+        got_type = type_mapping.get(type(fmt).__name__, type(fmt).__name__)
+        raise Exception(f"Runtime error: printf expects char* for format string, got {got_type}")
+    format_str = vm.read_cstring(fmt.addr)
     result = ""
     arg_index = 0  # 目前要使用的可變參數位置。
     i = 0          # 目前正在解析的格式字串位置。
@@ -56,7 +43,7 @@ def printf(vm: VirtualMemory, fmt: char_ptr, *args) -> None:
                     result += str(args[arg_index])
                 else:
                     got_type = type_mapping.get(type(args[arg_index]).__name__, type(args[arg_index]).__name__)
-                    raise Exception(f"Runtime error: printf expects int or hex for %d, got {got_type}")
+                    raise Exception(f"Runtime error: printf expects int for %d, got {got_type}")
                 arg_index += 1
                 i += 2
             elif specifier == 's':
@@ -65,14 +52,8 @@ def printf(vm: VirtualMemory, fmt: char_ptr, *args) -> None:
                 if type(args[arg_index]) is not char_ptr:
                     got_type = type_mapping.get(type(args[arg_index]).__name__, type(args[arg_index]).__name__)
                     raise Exception(f"Runtime error: printf expects char* for %s, got {got_type}")
-                str_offset = 0
-                while True:
-                    vm.check_bounds(args[arg_index].addr, args[arg_index].addr + str_offset, 1)
-                    c = vm.get_char(args[arg_index].addr + str_offset)
-                    if c == 0:
-                        break
-                    result += chr(c)
-                    str_offset += 1
+                # read_cstring 處理邊界驗證，不需要手動逐字元迴圈
+                result += vm.read_cstring(args[arg_index].addr)
                 arg_index += 1
                 i += 2
             elif specifier == 'c':
@@ -80,8 +61,8 @@ def printf(vm: VirtualMemory, fmt: char_ptr, *args) -> None:
                     raise Exception("Runtime error: printf argument missing")
                 value = args[arg_index]
                 if type(value) is int and 0 <= value <= 127:
-                    result += chr(value) # %c 僅支援 ASCII 字元碼 0..127。
-                elif type(value) is int and (value < 0 or value > 127):
+                    result += chr(value)  # %c 僅支援 ASCII 字元碼 0..127。
+                elif type(value) is int:
                     raise Exception(f"Runtime error: printf %c expects ASCII code 0..127, got {value}")
                 else:
                     got_type = type_mapping.get(type(value).__name__, type(value).__name__)
@@ -93,8 +74,8 @@ def printf(vm: VirtualMemory, fmt: char_ptr, *args) -> None:
                     raise Exception("Runtime error: printf argument missing")
                 if type(args[arg_index]) is not int:
                     got_type = type_mapping.get(type(args[arg_index]).__name__, type(args[arg_index]).__name__)
-                    raise Exception(f"Runtime error: printf expects int or hex for %x, got {got_type}")
-                result += format(args[arg_index], 'x') # format () 會回傳字串
+                    raise Exception(f"Runtime error: printf expects int for %x, got {got_type}")
+                result += format(args[arg_index], 'x')
                 arg_index += 1
                 i += 2
             else:
@@ -109,8 +90,12 @@ def printf(vm: VirtualMemory, fmt: char_ptr, *args) -> None:
         raise Exception("Runtime error: printf argument count mismatch")
     print(result, end='')
 
-#int putchar(int ch);
-def putchar(ch:int)-> int:
+# void scanf(char* fmt, ...);
+def scanf(vm: VirtualMemory, fmt: char_ptr, *args) -> None:
+    pass  # scanf 的實作較複雜，暫時留空。
+
+# int putchar(int ch);
+def putchar(ch: int) -> int:
     if type(ch) is not int:
         got_type = type_mapping.get(type(ch).__name__, type(ch).__name__)
         raise Exception(f"Runtime error: putchar expects int ASCII code 0..127, got {got_type}")
@@ -118,84 +103,179 @@ def putchar(ch:int)-> int:
         raise Exception(f"Runtime error: putchar expects ASCII code 0..127, got {ch}")
     print(chr(ch), end='')
     return ch
-#int getchar();
-def getchar()-> int:
+
+# int getchar();
+def getchar() -> int:
     ch = input()
     return ord(ch[0]) if ch else -1
 
-#math functions
-def abs(x:int)-> int:
+# math functions
+def abs(x: int) -> int:
+    if type(x) is not int:
+        got_type = type_mapping.get(type(x).__name__, type(x).__name__)
+        raise Exception(f"Runtime error: abs expects int, got {got_type}")
     return x if x >= 0 else -x
 
-def max(a:int, b:int)-> int:
+def max(a: int, b: int) -> int:
+    if type(a) is not int:
+        got_type = type_mapping.get(type(a).__name__, type(a).__name__)
+        raise Exception(f"Runtime error: max expects int for first argument, got {got_type}")
+    if type(b) is not int:
+        got_type = type_mapping.get(type(b).__name__, type(b).__name__)
+        raise Exception(f"Runtime error: max expects int for second argument, got {got_type}")
     return a if a >= b else b
 
-def min(a:int, b:int)-> int:
+def min(a: int, b: int) -> int:
+    if type(a) is not int:
+        got_type = type_mapping.get(type(a).__name__, type(a).__name__)
+        raise Exception(f"Runtime error: min expects int for first argument, got {got_type}")
+    if type(b) is not int:
+        got_type = type_mapping.get(type(b).__name__, type(b).__name__)
+        raise Exception(f"Runtime error: min expects int for second argument, got {got_type}")
     return a if a <= b else b
 
-def pow(base:int, exp:int)-> int:
+def pow(base: int, exp: int) -> int:
+    if type(base) is not int:
+        got_type = type_mapping.get(type(base).__name__, type(base).__name__)
+        raise Exception(f"Runtime error: pow expects int for base, got {got_type}")
+    if type(exp) is not int:
+        got_type = type_mapping.get(type(exp).__name__, type(exp).__name__)
+        raise Exception(f"Runtime error: pow expects int for exp, got {got_type}")
     return base ** exp if exp >= 0 else 0
 
-def sqrt(x:int)-> int:
-    if(x < 0):
+def sqrt(x: int) -> int:
+    if type(x) is not int:
+        got_type = type_mapping.get(type(x).__name__, type(x).__name__)
+        raise Exception(f"Runtime error: sqrt expects int, got {got_type}")
+    if x < 0:
         raise Exception("Runtime error: sqrt argument must be a non-negative integer")
     return math.floor(x**0.5)
 
-def mod(a:int, b:int)-> int:
-    if(b == 0):
+def mod(a: int, b: int) -> int:
+    if type(a) is not int:
+        got_type = type_mapping.get(type(a).__name__, type(a).__name__)
+        raise Exception(f"Runtime error: mod expects int for first argument, got {got_type}")
+    if type(b) is not int:
+        got_type = type_mapping.get(type(b).__name__, type(b).__name__)
+        raise Exception(f"Runtime error: mod expects int for second argument, got {got_type}")
+    if b == 0:
         raise Exception("Runtime error: division by zero")
     return a % b
 
-def srand(seed:int)-> None:
-    random.seed(seed) #處理種子傳遞問題
-
-def rand()-> int:
+def rand() -> int:
     return random.randint(0, 32767)
 
-#memory and tool functions
-#void memset(char* ptr, int value, int size);
-def memset(vm: VirtualMemory,ptr: char_ptr, value: int, num: int)-> None:
+# memory and string functions
+
+# void memset(char* ptr, int value, int num);
+def memset(vm: VirtualMemory, ptr: char_ptr, value: int, num: int) -> None:
+    if type(ptr) is not char_ptr:
+        got_type = type_mapping.get(type(ptr).__name__, type(ptr).__name__)
+        raise Exception(f"Runtime error: memset expects char* for ptr, got {got_type}")
+    if type(value) is not int:
+        got_type = type_mapping.get(type(value).__name__, type(value).__name__)
+        raise Exception(f"Runtime error: memset expects int for value, got {got_type}")
+    if type(num) is not int:
+        got_type = type_mapping.get(type(num).__name__, type(num).__name__)
+        raise Exception(f"Runtime error: memset expects int for num, got {got_type}")
+    # check_ptr 確認整個 [ptr.addr, ptr.addr+num) 都在合法 allocation 內
+    vm.check_ptr(ptr.addr, num)
     for i in range(num):
         vm.set_char(ptr.addr + i, value)
-#int strlen(char* str);
-def strlen(vm: VirtualMemory,s: char_ptr)-> int:
-    length = 0
-    while vm.get_char(s.addr + length) != 0:
-        length += 1
-    return length
-#int sizeof_int()
-def sizeof_int()-> int:
+
+# int strlen(char* str);
+def strlen(vm: VirtualMemory, s: char_ptr) -> int:
+    if type(s) is not char_ptr:
+        got_type = type_mapping.get(type(s).__name__, type(s).__name__)
+        raise Exception(f"Runtime error: strlen expects char*, got {got_type}")
+    return len(vm.read_cstring(s.addr))
+
+# int sizeof_int();
+def sizeof_int() -> int:
     return 4
 
-def sizeof_char()-> int:
+# int sizeof_char();
+def sizeof_char() -> int:
     return 1
 
-def atoi(char_str: str)-> int:
-    return int(char_str)
+# int atoi(char* str);
+def atoi(vm: VirtualMemory, char_str: char_ptr) -> int:
+    if type(char_str) is not char_ptr:
+        got_type = type_mapping.get(type(char_str).__name__, type(char_str).__name__)
+        raise Exception(f"Runtime error: atoi expects char*, got {got_type}")
 
-#void strcpy(char *dest, char *src);
-def strcpy(vm: VirtualMemory, dest: char_ptr, src: char_ptr)-> None:
+    text = vm.read_cstring(char_str.addr)
+    index = 0
 
-    i = 0
-    while True:
-        vm.check_bounds(dest.addr, dest.addr + i, 1)
-        vm.check_bounds(src.addr, src.addr + i, 1)
+    # C atoi 會先略過開頭空白：space、form feed、newline、carriage return、tab、vertical tab。
+    while index < len(text) and text[index] in " \f\n\r\t\v":
+        index += 1
 
-        c = vm.get_char(src.addr + i)
-        vm.set_char(dest.addr + i, c)
-        if c == 0:
-            break
-        i += 1
+    # 接著只接受一個可選的正負號；像 "+-12" 或 "- 12" 不會被視為合法數字。
+    sign = 1
+    if index < len(text) and text[index] in "+-":
+        if text[index] == "-":
+            sign = -1
+        index += 1
 
-#int strcmp(char *s1, char *s2)
-def strcmp(vm: VirtualMemory, s1: char_ptr, s2: char_ptr)-> int:
-    vm.check_bounds(s1.addr, s1.addr + 1, 1)
-    i = 0
-    while True:
-        c1 = vm.get_char(s1.addr + i)
-        c2 = vm.get_char(s2.addr + i)
-        if c1 != c2:
-            return c1 - c2
-        if c1 == 0: # both strings end
-            return 0
-        i += 1
+    # 從第一個數字開始累積，遇到非數字立即停止，符合 C atoi("12abc") == 12。
+    value = 0
+    has_digit = False
+    while index < len(text) and "0" <= text[index] <= "9":
+        has_digit = True
+        value = value * 10 + (ord(text[index]) - ord("0"))
+        index += 1
+
+    # C atoi 在沒有讀到任何數字時回傳 0，而不是丟出錯誤。
+    if not has_digit:
+        return 0
+    return sign * value
+
+# void itoa(int value, char* str);
+def itoa(vm: VirtualMemory, value: int, char_str: char_ptr) -> None:
+    if type(value) is not int:
+        got_type = type_mapping.get(type(value).__name__, type(value).__name__)
+        raise Exception(f"Runtime error: itoa expects int for value, got {got_type}")
+    if type(char_str) is not char_ptr:
+        got_type = type_mapping.get(type(char_str).__name__, type(char_str).__name__)
+        raise Exception(f"Runtime error: itoa expects char* for str, got {got_type}")
+    # 先將整數轉為字串，然後寫入 char_str 指向的記憶體位置，最後加上結束符號 '\0'。
+    s = str(value)
+    max_len = char_str.length if char_str.length > 0 else len(s) + 1
+    vm.write_cstring(char_str.addr, s, max_len)
+
+# void strcpy(char* dest, char* src);
+def strcpy(vm: VirtualMemory, dest: char_ptr, src: char_ptr) -> None:
+    if type(dest) is not char_ptr:
+        got_type = type_mapping.get(type(dest).__name__, type(dest).__name__)
+        raise Exception(f"Runtime error: strcpy expects char* for dest, got {got_type}")
+    if type(src) is not char_ptr:
+        got_type = type_mapping.get(type(src).__name__, type(src).__name__)
+        raise Exception(f"Runtime error: strcpy expects char* for src, got {got_type}")
+    s = vm.read_cstring(src.addr)
+    # dest.length > 0 時強制 buffer size 限制；為 0（未知）時交由 write_cstring 內的
+    # check_ptr 驗證 allocation 邊界，max_len 給剛好容納 src 的大小。
+    max_len = dest.length if dest.length > 0 else len(s) + 1
+    vm.write_cstring(dest.addr, s, max_len)
+
+# int strcmp(char* s1, char* s2);
+def strcmp(vm: VirtualMemory, s1: char_ptr, s2: char_ptr) -> int:
+    if type(s1) is not char_ptr:
+        got_type = type_mapping.get(type(s1).__name__, type(s1).__name__)
+        raise Exception(f"Runtime error: strcmp expects char* for s1, got {got_type}")
+    if type(s2) is not char_ptr:
+        got_type = type_mapping.get(type(s2).__name__, type(s2).__name__)
+        raise Exception(f"Runtime error: strcmp expects char* for s2, got {got_type}")
+    str1 = vm.read_cstring(s1.addr)
+    str2 = vm.read_cstring(s2.addr)
+    # 逐字元比較，包含共同前綴結束時的 '\0'，使回傳值與 C strcmp 一致。
+    index = 0
+    while index < len(str1) and index < len(str2):
+        diff = ord(str1[index]) - ord(str2[index])
+        if diff != 0:
+            return diff
+        index += 1
+    # 若共同前綴完全相同，則較長字串被視為較大；或兩者同長且完全相同則回傳 0。
+    c1 = ord(str1[index]) if index < len(str1) else 0
+    c2 = ord(str2[index]) if index < len(str2) else 0
+    return c1 - c2

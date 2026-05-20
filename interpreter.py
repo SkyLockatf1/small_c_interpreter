@@ -36,7 +36,7 @@ for name, obj in inspect.getmembers(c_builtins, inspect.isfunction):
         builtins_funcs.append(name)
 
 # 字串相關函式需要讀寫虛擬記憶體，因此呼叫時會額外傳入 memory 物件。
-str_funcs = ["memset","strlen","strcmp","strcpy","strcat","printf","puts","scanf"]
+str_funcs = ["memset","strlen","strcmp","strcpy","strcat","printf","puts","scanf","atoi","itoa"]
 
 # break / continue 可能出現在巢狀 block 或 if 裡，
 # 用內部 signal 往外傳遞，直到最近的迴圈節點接住。
@@ -53,6 +53,7 @@ class Interpreter:
         # 保存目前執行環境的虛擬記憶體與符號表，後續求值時會用來查變數、地址與函式。
         self.memory: memory.VirtualMemory = memory.VirtualMemory()
         self.symtable: symtable.symtable = symtable.symtable()
+        self.trace_enabled = False # 之後實作 TRACE 指令時會用到
         self.randseed = None # 之後實作 rand() 時會用到
 
     def evaluate(self, ast_node) -> object:
@@ -86,7 +87,7 @@ class Interpreter:
             elif ast_node.operator == "&":
                 if not isinstance(ast_node.operand, parser.Identifier):
                     raise Exception(f"Runtime error: Cannot apply unary '&' to non-variable at line {ast_node.line}.")
-                pass# 這裡要實作取地址邏輯，類似 C 語言的 &var，從符號表查出變數的位址並回傳
+                pass
             elif ast_node.operator == "++" and ast_node.postfix == False:
                 if not isinstance(ast_node.operand, parser.Identifier):
                     raise Exception(f"Runtime error: Cannot apply unary '++' to non-variable at line {ast_node.line}.")

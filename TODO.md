@@ -25,6 +25,25 @@
 
 ---
 
+## 已確認完成或部分完成項目
+
+### 已完成
+
+- `SAVE filename`：已可將 buffer 寫入檔案，並處理空 buffer、空檔名、權限錯誤、路徑是資料夾與一般寫入錯誤。
+- `sizeof_int()` / `sizeof_char()`：已可回傳 `4` / `1`。
+- `atoi(char* str)`：已改成 C 風格轉換，支援前導空白、可選正負號、遇到非數字停止，沒有讀到數字時回傳 `0`。
+- `itoa(int value, char* str)`：已支援十進位整數轉字串，會寫入結尾 `\0` 並檢查 buffer 大小。
+- `strcmp(char* s1, char* s2)`：已改成逐字元比較，包含共同前綴結束時的 `\0` 比較，回傳值邏輯與 C `strcmp` 一致。
+- `strlen` / `strcpy` / `puts` / `printf` / `memset`：已接上基本型別檢查與記憶體邊界檢查。
+- `symtable.py` 底層 API：已提供 scope stack、function table、變數/陣列/function define 與 lookup API。
+
+### 部分完成
+
+- `TRACE ON` / `TRACE OFF`：指令狀態切換已完成，但尚未實作逐 statement trace 輸出。
+- string / pointer bounds check：`read_cstring()`、`write_cstring()`、`check_ptr()` 已存在並被部分 built-ins 使用；`scanf`、`strcat` 與 array decay 的 length 傳遞仍需補齊。
+
+---
+
 ## 1. P0：會直接卡住驗收的功能
 
 ### TODO 1：完成 `RUN`
@@ -93,43 +112,25 @@ No errors found.
 
 ### TODO 4：完成 `TRACE ON` / `TRACE OFF`
 
-目前 `TRACE` 尚未實作。
+目前 `TRACE ON` / `TRACE OFF` 的狀態切換已完成，但逐 statement trace 尚未實作。
+
+#### 已完成
+
+- `TRACE ON` 會設定 `interpreter_instance.trace_enabled = True`。
+- `TRACE OFF` 會設定 `interpreter_instance.trace_enabled = False`。
+- `NEW` 會建立新的 `Interpreter()`，因此會重置 trace 狀態。
 
 #### 需要完成
 
-- 在 `Interpreter` 中加入 `trace_enabled` 狀態。
-- `TRACE ON` 啟用 trace。
-- `TRACE OFF` 關閉 trace。
 - 每個 statement 執行前輸出類似格式：
 
 ```text
 [line n] <statement>
 ```
 
-- `NEW` 時應重置 trace 狀態。
-
 ---
 
-### TODO 5：補上 `DELETE` / `INSERT` 指令分派
-
-`repl.py` 已有 `DELETE()` 與 `INSERT()`，但 `main.py` 尚未接上。
-
-#### 需要完成
-
-- 在 `main.py` 加入 `DELETE` 分支。
-- 在 `main.py` 加入 `INSERT` 分支。
-- 共用 `LIST` 的單行與範圍參數解析邏輯。
-- 錯誤格式要明確報錯，例如：
-
-```text
-DELETE 1
-DELETE 3-5
-INSERT 1
-```
-
----
-
-### TODO 6：修正 `HELP`
+### TODO 5：修正 `HELP`
 
 目前 `main.py` 呼叫 `repl.HELP()`，但 `repl.py` 的 `HELP` 定義與內容尚未完成。
 
@@ -164,24 +165,11 @@ EXIT
 
 ## 2. P1：語言核心尚未完成的部分
 
-### TODO 7：實作函式定義、函式表、`main()` 與 user-defined function call
+### TODO 6：實作函式定義、函式表、`main()` 與 user-defined function call
 
-目前 parser 有 `CallExpr`，但沒有完整的 function definition AST；interpreter 對非 built-in function call 也尚未實作。
+目前 parser 已有 `FunctionDef`、parameter list 與 function body parsing，`symtable.py` 也已有 function table API；但 interpreter 對非 built-in function call 尚未實作，`RUN` 也尚未走完整的 `main()` 執行流程。
 
 #### 需要完成
-
-- Parser 新增：
-  - `FunctionDef`
-  - `ReturnStmt`
-  - parameter list parsing
-  - function body parsing
-
-- Symbol table 新增：
-  - function table
-  - function return type
-  - parameter type
-  - parameter name
-  - definition line
 
 - Interpreter 新增：
   - `call_user_function()`
@@ -198,7 +186,7 @@ EXIT
 
 ---
 
-### TODO 8：實作 `return`
+### TODO 7：實作 `return`
 
 目前 lexer 有 `return` keyword，但 parser 與 interpreter 尚未完整支援。
 
@@ -221,24 +209,17 @@ Program exited with return value X.
 
 ---
 
-### TODO 9：重構 symbol table，支援作用域
+### TODO 8：接上 symbol table 作用域
 
-目前 `symtable.py` 只有單一 table，無法處理 local variables、function parameters 與 function definitions。
+目前 `symtable.py` 已有 scope stack、`VarSymbol` / `FunctionSymbol`、變數與函式的 define / lookup API；剩下的重點是把這些 API 正式接到 interpreter 與 REPL 顯示邏輯。
 
 #### 需要完成
 
-- 改成 scope stack。
-- 至少支援：
-  - global scope
-  - function local scope
-  - block scope，可視需求簡化
-- 區分：
-  - `define_var()`
-  - `lookup_var()`
-  - `define_func()`
-  - `lookup_func()`
-- function call 時 push scope。
-- function return 時 pop scope。
+- interpreter 的變數宣告改用 `define_var()` / `define_array()`。
+- function call 時使用 `push_scope()`。
+- function return 時使用 `pop_scope()`。
+- function parameters 綁定到 local scope。
+- block scope 是否要接上，可視驗收需求簡化。
 
 #### `VARS` 規則
 
@@ -248,7 +229,7 @@ Program exited with return value X.
 
 ---
 
-### TODO 10：完整實作陣列
+### TODO 9：完整實作陣列
 
 目前 parser 已有 `IndexExpr`、`InitList`、array declaration parsing，但 interpreter 尚未完整支援陣列配置、讀寫與越界檢查。
 
@@ -273,7 +254,7 @@ char s[] = "abc";
 
 ---
 
-### TODO 11：完整實作指標、取址與解參考
+### TODO 10：完整實作指標、取址與解參考
 
 目前 unary `&` 尚未完成，`*p` 解參考也尚未完整支援。
 
@@ -302,7 +283,7 @@ swap(&arr[i], &arr[min_idx]);
 
 ---
 
-### TODO 12：修正 C-style integer division
+### TODO 11：修正 C-style integer division
 
 目前 Python 的 `//` 對負數是向下取整，但 C 語言整數除法是 toward zero。
 
@@ -340,27 +321,25 @@ def c_div(a, b):
 
 ## 3. P2：內建函式與 I/O
 
-### TODO 13：修正與補齊 built-in functions
+### TODO 12：修正與補齊 built-in functions
 
-目前已有部分 built-in functions，但仍有缺漏與錯名。
+目前已有部分 built-in functions，但仍有缺漏。
+
+#### 已完成
+
+- `atoi(char* str)`：已接收 `char_ptr`，並加入需要 memory 的呼叫路徑。
+- `itoa(int value, char* dest)`：已支援十進位轉換，並加入需要 memory 的呼叫路徑。
+- `strcmp(char* s1, char* s2)`：已符合 C `strcmp` 的逐字元比較邏輯。
+- `sizeof_int()` / `sizeof_char()`：已完成。
 
 #### 必須完成
 
-- `atio` 改成 `atoi`
 - 新增：
 
 ```c
 scanf(...);
-itoa(int value, char* dest);
 strcat(char* dest, char* src);
 exit(int code);
-```
-
-- 確認並保留：
-
-```c
-sizeof_int();
-sizeof_char();
 ```
 
 #### `sizeof` 支援範圍
@@ -394,7 +373,7 @@ sizeof(char)
 
 ---
 
-### TODO 14：實作 `scanf`
+### TODO 13：實作 `scanf`
 
 已確認需要支援 `scanf`。
 
@@ -427,40 +406,32 @@ scanf("%s", buf);
 
 ---
 
-### TODO 15：修正 string / pointer bounds check 設計
+### TODO 14：修正 string / pointer bounds check 設計
 
-目前 `char_ptr` 建構子有 `length` 參數，但沒有保存；`memory.check_bounds()` 也較依賴 allocation 起始位址。
+目前 `char_ptr` / `int_ptr` 已保存 `addr`、`base_addr`、`length`，`memory.py` 也已有 `find_allocation()` / `check_ptr()` 可從任意 target address 找到所屬 allocation。
+
+#### 已完成
+
+- `read_cstring()`：讀取 C 字串時會限制在 allocation 邊界內，避免讀到相鄰配置區。
+- `write_cstring()`：寫入字串時會檢查 `max_len` 與實際 allocation 邊界。
+- `strlen`、`strcpy`、`strcmp`、`puts`、`printf`、`memset`、`itoa` 已使用上述檢查機制。
 
 #### 需要完成
 
-- `char_ptr` / `int_ptr` 建議加入：
-
-```python
-addr
-base_addr
-length
-elem_type
-```
-
-- 或重構 `memory.check_bounds()`，讓它能從任意 target address 找到所屬 allocation。
-- 統一以下函式的 bounds check：
+- 統一尚未完成函式的 bounds check：
 
 ```c
-strlen
-strcpy
 strcat
-strcmp
-puts
-printf
 scanf
-memset
 ```
+
+- 修正 interpreter array decay 建立 pointer 時的 length 傳遞，避免 `char_ptr.length` 保持為 `0` 而失去已知 buffer 大小。
 
 ---
 
 ## 4. P3：REPL 互動與輸出格式
 
-### TODO 16：重構 `main.py` 的 command dispatcher
+### TODO 15：重構 `main.py` 的 command dispatcher
 
 目前 `main.py` 同時處理：
 
@@ -496,7 +467,7 @@ main.py
 
 ---
 
-### TODO 17：移除 debug output
+### TODO 16：移除 debug output
 
 目前程式可能會輸出：
 
@@ -516,7 +487,7 @@ func call: ...
 
 ---
 
-### TODO 18：修正 `ABOUT` 內容
+### TODO 17：修正 `ABOUT` 內容
 
 目前 `ABOUT` 有 ASCII art，但作者、版本、學期仍需要補完整。
 
@@ -541,7 +512,7 @@ Semester: Spring 2026
 ---
 
 
-### TODO 20：修正 `APPEND` / `INSERT` 輸入提示
+### TODO 18：修正 `APPEND` / `INSERT` 輸入提示
 
 目前 `APPEND` 的提示不像作業範例。
 
@@ -565,43 +536,7 @@ Semester: Spring 2026
 
 ## 5. P4：Parser / Lexer 細節修正
 
-### TODO 21：支援 function definition parsing
-
-目前 parser 看到：
-
-```c
-int main() {
-    return 0;
-}
-```
-
-可能會先進入 variable declaration 路徑，因此需要區分 function definition 與 variable declaration。
-
-#### 建議判斷方式
-
-- 遇到：
-
-```text
-int identifier (
-char identifier (
-void identifier (
-```
-
-時，判斷為 function definition。
-
-- 遇到：
-
-```text
-int identifier;
-int identifier = ...
-int identifier[...]
-```
-
-時，判斷為 variable declaration。
-
----
-
-### TODO 22：整理 `#define` 的生命週期
+### TODO 19：整理 `#define` 的生命週期
 
 已確認 `#define` 需要在 REPL 互動模式中跨輸入保存。
 
@@ -632,21 +567,9 @@ int arr[SIZE];
 
 ---
 
-### TODO 23：postfix `++` / `--` 暫不列為必要項目
-
-已確認目前可以不用優先支援 postfix `i++` / `i--`。
-
-#### 處理方式
-
-- 不列入主要驗收 TODO。
-- parser 若遇到 postfix `++` / `--`，可以先報 syntax error。
-- 若之後時間足夠，再當作加分功能。
-
----
-
 ## 6. P5：測試與驗收準備
 
-### TODO 24：建立 regression tests
+### TODO 20：建立 regression tests
 
 建議建立以下測試檔：
 
@@ -690,12 +613,12 @@ tests/test_define_repl.sc
 ```text
 1. 修 main.py 指令分派：HELP / DELETE / INSERT / LOAD / CHECK / RUN / TRACE
 2. 移除 debug output，修 ABOUT / LIST / APPEND 輸出格式
-3. Parser 加 FunctionDef / ReturnStmt / main()
+3. Parser / Interpreter 加 ReturnStmt 與 main() 執行流程
 4. Interpreter 加 function table / return signal / user-defined call / recursion
-5. 重構 symtable：global + local scope；VARS 只顯示 global
+5. 接上 symtable scope API；VARS 只顯示 global
 6. 完整實作 array：宣告、初始化、IndexExpr、越界
 7. 完整實作 pointer：&、*、pointer assignment、array decay
-8. 補 builtins：atoi、itoa、strcat、scanf、exit、sizeof_int、sizeof_char
+8. 補 builtins：strcat、scanf、exit，並補齊尚未完成的 bounds check
 9. 支援 REPL 跨輸入保存 #define
 10. 修 C integer division / modulo
 11. 寫公開測試 A regression test

@@ -190,6 +190,17 @@ if __name__ == "__main__":
                 else:
                     raise Exception(f"Runtime error: Invalid format '{args}'. Use 'filename' for saving the program.")
             elif cmd == "TRACE":
+                if args:
+                    if args.upper() == "ON":
+                        interpreter_instance.trace_enabled = True
+                        print("Trace mode enabled.")
+                    elif args.upper() == "OFF":
+                        interpreter_instance.trace_enabled = False
+                        print("Trace mode disabled.")
+                    else:
+                        raise Exception(f"Runtime error: Invalid format '{args}'. Use 'ON' to enable or 'OFF' to disable tracing.")
+                else:
+                    raise Exception(f"Runtime error: Invalid format '{args}'. Use 'ON' to enable or 'OFF' to disable tracing.")
                 pass
             elif cmd == "VARS":
                 table = interpreter_instance.symtable.table
@@ -222,7 +233,7 @@ if __name__ == "__main__":
                 parser_instance = parser.parser(tokens)
                 program = parser_instance.parse()
                 for ast in program:
-                    print("AST:", ast)
+                    print("AST:", ast) # 這行可以幫助你確認 AST 結構是否正確，之後可以註解掉。
                     result = interpreter_instance.evaluate(ast)
                 # print("Result:", result)
 
