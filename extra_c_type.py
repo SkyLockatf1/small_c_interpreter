@@ -8,7 +8,7 @@ class char_ptr:
     base_addr : 所屬 buffer 的起始位址，供邊界檢查使用（預設等於 addr）
     length    : 所屬 buffer 的位元組大小，0 表示未知
     """
-    def __init__(self, addr: int, base_addr: int = None, length: int = 0):
+    def __init__(self, addr: int, base_addr: int|None = None, length: int = 0):
         self.addr = addr
         self.base_addr = base_addr if base_addr is not None else addr
         self.length = length
@@ -24,7 +24,7 @@ class int_ptr:
     base_addr : 所屬 buffer 的起始位址，供邊界檢查使用（預設等於 addr）
     length    : 所屬 buffer 的位元組大小，0 表示未知
     """
-    def __init__(self, addr: int, base_addr: int = None, length: int = 0):
+    def __init__(self, addr: int, base_addr: int|None = None, length: int = 0):
         self.addr = addr
         self.base_addr = base_addr if base_addr is not None else addr
         self.length = length

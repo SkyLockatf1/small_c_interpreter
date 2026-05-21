@@ -56,7 +56,7 @@ class Interpreter:
         self.trace_enabled = False # 之後實作 TRACE 指令時會用到
         self.randseed = None # 之後實作 rand() 時會用到
 
-    def evaluate(self, ast_node) -> object:
+    def evaluate(self, ast_node):
         # 根據 AST 節點型別遞迴求值，回傳此節點在目前執行環境中的值。
         if isinstance(ast_node, parser.Number):
             # 數字常數直接回傳原值，不需要額外查表。
@@ -87,35 +87,75 @@ class Interpreter:
             elif ast_node.operator == "&":
                 if not isinstance(ast_node.operand, parser.Identifier):
                     raise Exception(f"Runtime error: Cannot apply unary '&' to non-variable at line {ast_node.line}.")
-                pass
+                var_info = self.symtable.lookup_var(ast_node.operand.name)
+                if var_info.var_type == "int":
+                    return int_ptr(var_info.addr,var_info.addr,var_info.size)
+                elif var_info.var_type == "char":
+                    return char_ptr(var_info.addr,var_info.addr,var_info.size)
+                elif var_info.var_type == "int*" or var_info.var_type == "char*":
+                    raise Exception(f"Runtime error: Cannot apply unary '&' to pointer variable '{ast_node.operand.name}' at line {ast_node.line}.")
+                else:
+                    raise Exception(f"Runtime error: Unsupported variable type {var_info.var_type} for variable '{ast_node.operand.name}' at line {ast_node.line}.")
+            elif ast_node.operator == "*":
+                ptr = self.evaluate(ast_node.operand)
+                if not isinstance(ptr, (int_ptr, char_ptr)):
+                    raise Exception(f"Runtime error: Cannot apply unary '*' to non-pointer expression at line {ast_node.line}.")
+                if isinstance(ptr, int_ptr):
+                    self.memory.check_ptr(ptr.addr,4) # 是否為有效指標（非 null pointer，且不越界）
+                    return self.memory.get_int(ptr.addr)
+                elif isinstance(ptr, char_ptr):
+                    self.memory.check_ptr(ptr.addr,1) # 是否為有效指標（非 null pointer，且不越界）
+                    return self.memory.get_char(ptr.addr)
             elif ast_node.operator == "++" and ast_node.postfix == False:
                 if not isinstance(ast_node.operand, parser.Identifier):
                     raise Exception(f"Runtime error: Cannot apply unary '++' to non-variable at line {ast_node.line}.")
-                var_info = self.symtable.lookup(ast_node.operand.name)
+                var_info = self.symtable.lookup_var(ast_node.operand.name)
                 old_val=0
-                if var_info['type'] == 'int':
-                    old_val = self.memory.get_int(var_info['addr'])
-                    self.memory.set_int(var_info['addr'], old_val + 1)
-                elif var_info['type'] == 'char':
-                    old_val = self.memory.get_char(var_info['addr'])
-                    self.memory.set_char(var_info['addr'], old_val + 1)
+                if var_info.var_type == 'int':
+                    old_val = self.memory.get_int(var_info.addr)
+                    self.memory.set_int(var_info.addr, old_val + 1)
+                elif var_info.var_type == 'char':
+                    old_val = self.memory.get_char(var_info.addr)
+                    self.memory.set_char(var_info.addr, old_val + 1)
+                # elif var_info.var_type == 'int*':
+                #     old_addr = self.memory.get_ptr(var_info.addr) # 取得目前指標值
+                #     new_addr = self.memory.ptr_add(old_addr, 1, "int") # 指標運算：假設是 int*，每次加 1 就加 4 bytes
+                #     self.memory.set_ptr(var_info.addr, new_addr)
+                #     return int_ptr(new_addr, new_addr, var_info.size) # 回傳加 4 後的指標值
+                # elif var_info.var_type == 'char*':
+                #     old_addr = self.memory.get_ptr(var_info.addr) # 取得目前指標值
+                #     new_addr = self.memory.ptr_add(old_addr, 1, "char") # 指標運算：char* 加 1 實際上地址加 1
+                #     self.memory.set_ptr(var_info.addr, new_addr)
+                #     return char_ptr(new_addr, new_addr, var_info.size) # 回傳加 1 後的指標值
                 else:
-                    raise Exception(f"Runtime error: Unsupported variable type {var_info['type']} for variable '{ast_node.operand.name}' at line {ast_node.line}.")
+                    raise Exception(f"Runtime error: Unsupported variable type {var_info.var_type} for variable '{ast_node.operand.name}' at line {ast_node.line}.")
                 return old_val + 1
             elif ast_node.operator == "--" and ast_node.postfix == False:
                 if not isinstance(ast_node.operand, parser.Identifier):
                     raise Exception(f"Runtime error: Cannot apply unary '--' to non-variable at line {ast_node.line}.")
-                var_info = self.symtable.lookup(ast_node.operand.name)
+                var_info = self.symtable.lookup_var(ast_node.operand.name)
                 old_val=0
-                if var_info['type'] == 'int':
-                    old_val = self.memory.get_int(var_info['addr'])
-                    self.memory.set_int(var_info['addr'], old_val - 1)
-                elif var_info['type'] == 'char':
-                    old_val = self.memory.get_char(var_info['addr'])
-                    self.memory.set_char(var_info['addr'], old_val - 1)
+                if var_info.var_type == 'int':
+                    old_val = self.memory.get_int(var_info.addr)
+                    self.memory.set_int(var_info.addr, old_val - 1)
+                    return old_val - 1
+                elif var_info.var_type == 'char':
+                    old_val = self.memory.get_char(var_info.addr)
+                    self.memory.set_char(var_info.addr, old_val - 1)
+                    return old_val - 1
+                # elif var_info.var_type == 'int*':
+                #     old_addr = self.memory.get_ptr(var_info.addr) # 取得目前指標值
+                #     new_addr = self.memory.ptr_add(old_addr, -1, "int") # 指標運算：int*，每次減 1 就減 4 bytes
+                #     self.memory.set_ptr(var_info.addr, new_addr)
+                #     return int_ptr(new_addr, new_addr, var_info.size) # 回傳減 4 後的指標值
+                # elif var_info.var_type == 'char*':
+                #     old_addr = self.memory.get_ptr(var_info.addr) # 取得目前指標值
+                #     new_addr = self.memory.ptr_add(old_addr, -1, "char") # 指標運算：char* 減 1 實際上地址減 1
+                #     self.memory.set_ptr(var_info.addr, new_addr)
+                #     return char_ptr(new_addr, new_addr, var_info.size) # 回傳減 1 後的指標值
                 else:
-                    raise Exception(f"Runtime error: Unsupported variable type {var_info['type']} for variable '{ast_node.operand.name}' at line {ast_node.line}.")
-                return old_val - 1
+                    raise Exception(f"Runtime error: Unsupported variable type {var_info.var_type} for variable '{ast_node.operand.name}' at line {ast_node.line}.")
+                
                 
                 
         elif isinstance(ast_node, parser.BinaryExpr):
@@ -241,6 +281,36 @@ class Interpreter:
                 pass # 這裡要實作呼叫 user-defined 函式的邏輯，從符號表查函式定義，建立新的執行環境，執行函式體等
             return return_value
         elif isinstance(ast_node, parser.VarDecl):
+            if ast_node.is_array:
+                # 陣列目前只支援 int/char 元素；指標陣列先保守拒絕，避免 memory.write() 無法處理。
+                if ast_node.var_type not in ("int", "char"):
+                    raise Exception(f"Runtime error: Array element type {ast_node.var_type} is not supported for variable '{ast_node.name}' at line {ast_node.line}.")
+                if ast_node.array_size is None or ast_node.array_size <= 0:
+                    raise Exception(f"Runtime error: Array '{ast_node.name}' length must be greater than 0 at line {ast_node.line}.")
+
+                element_size = symtable.sizeof_type(ast_node.var_type)
+                total_size = ast_node.array_size * element_size
+                addr = self.memory.alloc_global(total_size)
+                self.symtable.define_array(ast_node.name, ast_node.var_type, addr, ast_node.array_size, ast_node.line)
+
+                if isinstance(ast_node.init_expr, parser.InitList):
+                    for index, value_expr in enumerate(ast_node.init_expr.values):
+                        value = self.evaluate(value_expr)
+                        if not isinstance(value, int):
+                            raise Exception(f"Runtime error: Cannot initialize array '{ast_node.name}' element {index} with value of type {type_mapping[type(value).__name__]} at line {ast_node.line}.")
+                        self.memory.array_write(addr, index, ast_node.var_type, value)
+                elif isinstance(ast_node.init_expr, parser.String):
+                    if ast_node.var_type != "char":
+                        raise Exception(f"Runtime error: String initializer is only valid for char array '{ast_node.name}' at line {ast_node.line}.")
+                    for index, ch in enumerate(ast_node.init_expr.value):
+                        self.memory.array_write(addr, index, "char", ord(ch))
+                    if len(ast_node.init_expr.value) < ast_node.array_size:
+                        self.memory.array_write(addr, len(ast_node.init_expr.value), "char", 0)
+                elif ast_node.init_expr is not None:
+                    raise Exception(f"Runtime error: Unsupported initializer for array '{ast_node.name}' at line {ast_node.line}.")
+
+                return None # 陣列宣告敘述不產生數值回傳
+
             # 1. 計算所需記憶體大小並配置空間
             size = 0
             if ast_node.var_type == "int":
@@ -256,7 +326,7 @@ class Interpreter:
             addr = self.memory.alloc_global(size)
             
             # 2. 註冊進符號表
-            self.symtable.define(ast_node.name, ast_node.var_type, addr)
+            self.symtable.define_var(ast_node.name, ast_node.var_type, addr, ast_node.line)
             
             # 3. 如果有給初始值，算出來並寫入記憶體
             if ast_node.init_expr:
@@ -270,13 +340,33 @@ class Interpreter:
             return None # 宣告敘述不產生數值回傳
         elif isinstance(ast_node, parser.Identifier):
             # 變數取值：先查符號表拿位址，再從記憶體讀值
-            var_info = self.symtable.lookup(ast_node.name)
-            if var_info['type'] == 'int':
-                return self.memory.get_int(var_info['addr'])
-            elif var_info['type'] == 'char':
-                return self.memory.get_char(var_info['addr'])
+            var_info = self.symtable.lookup_var(ast_node.name)
+            if var_info.var_type == 'int':
+                return self.memory.get_int(var_info.addr)
+            elif var_info.var_type == 'char':
+                return self.memory.get_char(var_info.addr)
+            elif var_info.var_type == 'int*':
+                target_addr = self.memory.get_ptr(var_info.addr) # 先讀出指標變數本身的值（也就是它指向的地址）
+                return int_ptr(target_addr,target_addr,var_info.size)
+            elif var_info.var_type == 'char*': 
+                target_addr = self.memory.get_ptr(var_info.addr) # 先讀出指標變數本身的值（也就是它指向的地址）
+                return char_ptr(target_addr,target_addr,var_info.size)
             else:
-                raise Exception(f"Runtime error: Unsupported variable type {var_info['type']} for variable '{ast_node.name}' at line {ast_node.line}.")
+                raise Exception(f"Runtime error: Unsupported variable type {var_info.var_type} for variable '{ast_node.name}' at line {ast_node.line}.")
+        elif isinstance(ast_node, parser.IndexExpr):
+            # 目前只支援一維陣列讀取，例如 a[i]；指標索引與多維陣列之後再補。
+            if not isinstance(ast_node.base, parser.Identifier):
+                raise Exception(f"Runtime error: Array index base must be a variable at line {ast_node.line}.")
+
+            var_info = self.symtable.lookup_var(ast_node.base.name)
+            if not var_info.is_array:
+                raise Exception(f"Runtime error: Variable '{ast_node.base.name}' is not an array at line {ast_node.line}.")
+
+            index = self.evaluate(ast_node.index)
+            if not isinstance(index, int):
+                raise Exception(f"Runtime error: Array index must be int at line {ast_node.line}.")
+
+            return self.memory.array_read(var_info.addr, index, var_info.var_type)
         elif isinstance(ast_node, parser.AssignmentExpr):
             # 指定運算：目前我們只處理左邊是單純變數名的情況
             if not isinstance(ast_node.left, parser.Identifier):

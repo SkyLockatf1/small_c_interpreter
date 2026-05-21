@@ -175,10 +175,36 @@ class lexer:
                 cur_token = self.codes[self.position]
                 num += cur_token
                 self.position+=1
+            # Small-C 不支援浮點常數。
+            # 如果不在 lexer 階段攔截，像 123.45 會被切成 number、'.'、number，
+            # 後續 parser 只能看到分散的 token，錯誤訊息會比較難懂。
+            if(self.position < len(self.codes) and self.codes[self.position] in ['.', 'e', 'E']):
+                self._raise_unsupported_float(self.position - len(num))
             # 檢查數字後是否有非法字元（例如 123abc 或 123.45）
             if(self.position < len(self.codes) and (self.codes[self.position].isalpha() or self.codes[self.position] == '_')):
                 raise Exception(f"Syntax error: Invalid suffix on integer constant at line {self.line}")
             self._add_token(token_type.number,num)
+    def _raise_unsupported_float(self, start_position: int):
+        # 從浮點常數起點開始收集完整片段，讓錯誤訊息能顯示使用者實際輸入。
+        # 支援收集 123.45、1.、.5、1e3、1E-3、1.2e+3 等形式。
+        float_text = ""
+        position = start_position
+
+        while position < len(self.codes):
+            ch = self.codes[position]
+            # 浮點片段主體：數字、字母、底線與小數點都先收進來，
+            # 例如 1e3、1.2e3、1_bad 會完整出現在錯誤訊息中。
+            if(ch.isalnum() or ch == '_' or ch == '.'):
+                float_text += ch
+                position += 1
+            # 指數形式可以在 e/E 後接正負號，例如 1e-3 或 1E+3。
+            elif(ch in ['+', '-'] and len(float_text) > 0 and float_text[-1] in ['e', 'E']):
+                float_text += ch
+                position += 1
+            else:
+                break
+
+        raise Exception(f"Syntax error: Floating-point constants are not supported at line {self.line}: {float_text}")
     def _read_string_or_char(self):
         cur_token = self._current_char()
         quote_type = cur_token
@@ -256,6 +282,10 @@ class lexer:
             # 字串/字元常值
             elif(cur_token == '"' or cur_token == "'"):
                 self._read_string_or_char()
+            # Small-C 不支援 .5 這種浮點形式；單獨的 . 仍保留為 punctuator，
+            # 讓 a.b 之類的輸入交給 parser 判斷是否符合語法。
+            elif(cur_token == '.' and self.position + 1 < len(self.codes) and self.codes[self.position + 1].isdigit()):
+                self._raise_unsupported_float(self.position)
             # 分隔符號
             elif (cur_token in punctuator):
                 self._read_punctuator()
