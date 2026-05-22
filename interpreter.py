@@ -19,6 +19,17 @@ type_mapping = {
     'array': 'array',
     'None': 'void',
 }
+
+def c_div(left: int, right: int) -> int:
+    """C-style integer division: truncate toward zero, unlike Python // for negatives."""
+    quotient = abs(left) // abs(right)
+    return -quotient if (left < 0) != (right < 0) else quotient
+
+
+def c_mod(left: int, right: int) -> int:
+    """C-style remainder: same sign as dividend and consistent with c_div()."""
+    return left - c_div(left, right) * right
+
 # 用 importlib 按路徑載入本地 builtins.py，
 # 避免與 Python 內建的 builtins 模組（存放 print/len 等）同名衝突。
 # 直接 `import builtins` 只會得到 Python 自己的模組，永遠拿不到本地檔案。
@@ -32,7 +43,7 @@ _spec.loader.exec_module(c_builtins)
 # 掃描本地 builtins.py 中定義的函式，作為直譯器可直接呼叫的內建函式清單。
 builtins_funcs = []
 for name, obj in inspect.getmembers(c_builtins, inspect.isfunction):
-    if obj.__module__ == c_builtins.__name__:
+    if obj.__module__ == c_builtins.__name__ and not name.startswith("_"):
         builtins_funcs.append(name)
 
 # 字串相關函式需要讀寫虛擬記憶體，因此呼叫時會額外傳入 memory 物件。
@@ -55,6 +66,110 @@ class Interpreter:
         self.symtable: symtable.symtable = symtable.symtable()
         self.trace_enabled = False # 之後實作 TRACE 指令時會用到
         self.randseed = None # 之後實作 rand() 時會用到
+
+    def decay_array_value(self, value):
+        """將 expression 中的陣列值轉成首元素指標，對應 C 的 array-to-pointer decay。"""
+        if not isinstance(value, array):
+            return value
+        if value.elem_type == "int":
+            return int_ptr(value.addr)
+        if value.elem_type == "char":
+            return char_ptr(value.addr)
+        raise Exception(f"Runtime error: Unsupported array element type {value.elem_type}.")
+
+    def resolve_lvalue(self, expr):
+        """解析可寫入的左值 expression，回傳 (addr, type)。"""
+        if isinstance(expr, parser.Identifier):
+            # 變數本身是最基本的左值；陣列名稱只會 decay 成 pointer，不能被整體指定。
+            var_info = self.symtable.lookup_var(expr.name)
+            if var_info.is_array:
+                raise Exception(f"Runtime error: Cannot assign to array '{expr.name}' at line {expr.line}.")
+            return var_info.addr, var_info.var_type
+
+        if isinstance(expr, parser.IndexExpr):
+            # 字串常數雖然可讀取索引值，但不作為可寫左值，避免修改 literal 內容。
+            if isinstance(expr.base, parser.String):
+                raise Exception(f"Runtime error: Cannot assign to string literal at line {expr.line}.")
+            base_val = self.evaluate(expr.base)
+            index = self.evaluate(expr.index)
+            if not isinstance(index, int):
+                raise Exception(f"Runtime error: Array index must be int at line {expr.line}.")
+            if isinstance(base_val, array):
+                # arr[i]：已知 allocation 起點，直接以陣列邊界檢查取得元素地址。
+                element_size = symtable.sizeof_type(base_val.elem_type)
+                target_addr = base_val.addr + index * element_size
+                self.memory.check_bounds(base_val.addr, target_addr, element_size)
+                return target_addr, base_val.elem_type
+            if isinstance(base_val, int_ptr):
+                # p[i] 等同 *(p + i)，ptr_add() 會依 int stride 位移並檢查 allocation。
+                target_addr = self.memory.ptr_add(base_val.addr, index, "int")
+                self.memory.check_ptr(target_addr, 4)
+                return target_addr, "int"
+            if isinstance(base_val, char_ptr):
+                # char* 的索引以 1 byte 為 stride，回傳的左值型別是 char。
+                target_addr = self.memory.ptr_add(base_val.addr, index, "char")
+                self.memory.check_ptr(target_addr, 1)
+                return target_addr, "char"
+            raise Exception(f"Runtime error: Cannot apply index operator to {type_mapping[type(base_val).__name__]} at line {expr.line}.")
+
+        if isinstance(expr, parser.UnaryExpr) and expr.operator == "*":
+            # *p 作為左值時，寫入位置就是 p 目前指向的地址。
+            ptr = self.evaluate(expr.operand) # 先求 operand 的值，確認是指標後回傳地址與型別。
+            if isinstance(ptr, int_ptr):
+                self.memory.check_ptr(ptr.addr, 4)
+                return ptr.addr, "int"
+            if isinstance(ptr, char_ptr):
+                self.memory.check_ptr(ptr.addr, 1)
+                return ptr.addr, "char"
+            raise Exception(f"Runtime error: Cannot apply unary '*' to non-pointer expression at line {expr.line}.")
+
+        raise Exception(f"Runtime error: Left side of assignment must be a modifiable lvalue at line {expr.line}.")
+
+    def read_lvalue(self, addr, value_type):
+        """依左值型別從記憶體讀出目前值。"""
+        # 複合指定需要先讀舊值，例如 arr[i] += 1 或 *p -= 2。
+        if value_type == "int":
+            return self.memory.get_int(addr)
+        if value_type == "char":
+            return self.memory.get_char(addr)
+        if value_type == "int*":
+            return int_ptr(self.memory.get_ptr(addr))
+        if value_type == "char*":
+            return char_ptr(self.memory.get_ptr(addr))
+        raise Exception(f"Runtime error: Unsupported lvalue type {value_type}.")
+
+    def write_lvalue(self, addr, value_type, value, line):
+        """依左值型別寫入新值，並在 pointer 指定時維持型別安全。"""
+        # 寫入集中在這裡處理，讓 x、arr[i]、p[i]、*p 共用同一套型別檢查。
+        if value_type == "int":
+            if not isinstance(value, int):
+                raise Exception(f"Runtime error: Cannot assign value of type {type_mapping[type(value).__name__]} to int at line {line}.")
+            self.memory.set_int(addr, value)
+            return
+        if value_type == "char":
+            if not isinstance(value, int):
+                raise Exception(f"Runtime error: Cannot assign value of type {type_mapping[type(value).__name__]} to char at line {line}.")
+            self.memory.set_char(addr, value)
+            return
+        if value_type == "int*":
+            # pointer 左值可接受同型 pointer；array 右值先 decay 成首元素 pointer。
+            value = self.decay_array_value(value)
+            if isinstance(value, int):
+                raise Exception(f"Runtime error: Cannot assign integer value {value} to int* at line {line}.")
+            if not isinstance(value, int_ptr):
+                raise Exception(f"Runtime error: Cannot assign value of type {type_mapping[type(value).__name__]} to int* at line {line}.")
+            self.memory.set_ptr(addr, value.addr)
+            return
+        if value_type == "char*":
+            # char array 與 string literal 都會透過 decay_array_value() 轉成 char_ptr。
+            value = self.decay_array_value(value)
+            if isinstance(value, int):
+                raise Exception(f"Runtime error: Cannot assign integer value {value} to char* at line {line}.")
+            if not isinstance(value, char_ptr):
+                raise Exception(f"Runtime error: Cannot assign value of type {type_mapping[type(value).__name__]} to char* at line {line}.")
+            self.memory.set_ptr(addr, value.addr)
+            return
+        raise Exception(f"Runtime error: Unsupported lvalue type {value_type} at line {line}.")
 
     def evaluate(self, ast_node):
         # 根據 AST 節點型別遞迴求值，回傳此節點在目前執行環境中的值。
@@ -85,17 +200,38 @@ class Interpreter:
                     raise Exception(f"Runtime error: Cannot apply unary '~' to {type_mapping[type(val).__name__]} at line {ast_node.line}.")
                 return ~val
             elif ast_node.operator == "&":
-                if not isinstance(ast_node.operand, parser.Identifier):
-                    raise Exception(f"Runtime error: Cannot apply unary '&' to non-variable at line {ast_node.line}.")
-                var_info = self.symtable.lookup_var(ast_node.operand.name)
-                if var_info.var_type == "int":
-                    return int_ptr(var_info.addr,var_info.addr,var_info.size)
-                elif var_info.var_type == "char":
-                    return char_ptr(var_info.addr,var_info.addr,var_info.size)
-                elif var_info.var_type == "int*" or var_info.var_type == "char*":
-                    raise Exception(f"Runtime error: Cannot apply unary '&' to pointer variable '{ast_node.operand.name}' at line {ast_node.line}.")
+                if isinstance(ast_node.operand, parser.Identifier):
+                    var_info = self.symtable.lookup_var(ast_node.operand.name)
+                    if var_info.is_array:
+                        raise Exception(f"Runtime error: Cannot apply unary '&' to array '{ast_node.operand.name}'; use '{ast_node.operand.name}' or '&{ast_node.operand.name}[0]' at line {ast_node.line}.")
+                    if var_info.var_type == "int":
+                        return int_ptr(var_info.addr)
+                    elif var_info.var_type == "char":
+                        return char_ptr(var_info.addr)
+                    elif var_info.var_type == "int*" or var_info.var_type == "char*":
+                        raise Exception(f"Runtime error: Cannot apply unary '&' to pointer variable '{ast_node.operand.name}' at line {ast_node.line}.")
+                    else:
+                        raise Exception(f"Runtime error: Unsupported variable type {var_info.var_type} for variable '{ast_node.operand.name}' at line {ast_node.line}.")
+                elif isinstance(ast_node.operand, parser.IndexExpr):
+                    if not isinstance(ast_node.operand.base, parser.Identifier):
+                        raise Exception(f"Runtime error: Cannot apply unary '&' to non-array element at line {ast_node.line}.")
+                    var_info = self.symtable.lookup_var(ast_node.operand.base.name)
+                    if not var_info.is_array:
+                        raise Exception(f"Runtime error: Variable '{ast_node.operand.base.name}' is not an array at line {ast_node.line}.")
+                    index = self.evaluate(ast_node.operand.index)
+                    if not isinstance(index, int):
+                        raise Exception(f"Runtime error: Array index must be int at line {ast_node.line}.")
+                    element_size = symtable.sizeof_type(var_info.var_type)
+                    target_addr = var_info.addr + index * element_size
+                    self.memory.check_bounds(var_info.addr, target_addr, element_size)
+                    if var_info.var_type == "int":
+                        return int_ptr(target_addr)
+                    elif var_info.var_type == "char":
+                        return char_ptr(target_addr)
+                    else:
+                        raise Exception(f"Runtime error: Unsupported array element type {var_info.var_type} for variable '{ast_node.operand.base.name}' at line {ast_node.line}.")
                 else:
-                    raise Exception(f"Runtime error: Unsupported variable type {var_info.var_type} for variable '{ast_node.operand.name}' at line {ast_node.line}.")
+                    raise Exception(f"Runtime error: Cannot apply unary '&' to non-variable at line {ast_node.line}.")
             elif ast_node.operator == "*":
                 ptr = self.evaluate(ast_node.operand)
                 if not isinstance(ptr, (int_ptr, char_ptr)):
@@ -117,16 +253,16 @@ class Interpreter:
                 elif var_info.var_type == 'char':
                     old_val = self.memory.get_char(var_info.addr)
                     self.memory.set_char(var_info.addr, old_val + 1)
-                # elif var_info.var_type == 'int*':
-                #     old_addr = self.memory.get_ptr(var_info.addr) # 取得目前指標值
-                #     new_addr = self.memory.ptr_add(old_addr, 1, "int") # 指標運算：假設是 int*，每次加 1 就加 4 bytes
-                #     self.memory.set_ptr(var_info.addr, new_addr)
-                #     return int_ptr(new_addr, new_addr, var_info.size) # 回傳加 4 後的指標值
-                # elif var_info.var_type == 'char*':
-                #     old_addr = self.memory.get_ptr(var_info.addr) # 取得目前指標值
-                #     new_addr = self.memory.ptr_add(old_addr, 1, "char") # 指標運算：char* 加 1 實際上地址加 1
-                #     self.memory.set_ptr(var_info.addr, new_addr)
-                #     return char_ptr(new_addr, new_addr, var_info.size) # 回傳加 1 後的指標值
+                elif var_info.var_type == 'int*':
+                    old_addr = self.memory.get_ptr(var_info.addr) # 取得目前指標值
+                    new_addr = self.memory.ptr_add(old_addr, 1, "int") # 指標運算：假設是 int*，每次加 1 就加 4 bytes
+                    self.memory.set_ptr(var_info.addr, new_addr)
+                    return int_ptr(new_addr) # 回傳加 4 後的指標值
+                elif var_info.var_type == 'char*':
+                    old_addr = self.memory.get_ptr(var_info.addr) # 取得目前指標值
+                    new_addr = self.memory.ptr_add(old_addr, 1, "char") # 指標運算：char* 加 1 實際上地址加 1
+                    self.memory.set_ptr(var_info.addr, new_addr)
+                    return char_ptr(new_addr) # 回傳加 1 後的指標值
                 else:
                     raise Exception(f"Runtime error: Unsupported variable type {var_info.var_type} for variable '{ast_node.operand.name}' at line {ast_node.line}.")
                 return old_val + 1
@@ -143,16 +279,16 @@ class Interpreter:
                     old_val = self.memory.get_char(var_info.addr)
                     self.memory.set_char(var_info.addr, old_val - 1)
                     return old_val - 1
-                # elif var_info.var_type == 'int*':
-                #     old_addr = self.memory.get_ptr(var_info.addr) # 取得目前指標值
-                #     new_addr = self.memory.ptr_add(old_addr, -1, "int") # 指標運算：int*，每次減 1 就減 4 bytes
-                #     self.memory.set_ptr(var_info.addr, new_addr)
-                #     return int_ptr(new_addr, new_addr, var_info.size) # 回傳減 4 後的指標值
-                # elif var_info.var_type == 'char*':
-                #     old_addr = self.memory.get_ptr(var_info.addr) # 取得目前指標值
-                #     new_addr = self.memory.ptr_add(old_addr, -1, "char") # 指標運算：char* 減 1 實際上地址減 1
-                #     self.memory.set_ptr(var_info.addr, new_addr)
-                #     return char_ptr(new_addr, new_addr, var_info.size) # 回傳減 1 後的指標值
+                elif var_info.var_type == 'int*':
+                    old_addr = self.memory.get_ptr(var_info.addr) # 取得目前指標值
+                    new_addr = self.memory.ptr_add(old_addr, -1, "int") # 指標運算：int*，每次減 1 就減 4 bytes
+                    self.memory.set_ptr(var_info.addr, new_addr)
+                    return int_ptr(new_addr) # 回傳減 4 後的指標值
+                elif var_info.var_type == 'char*':
+                    old_addr = self.memory.get_ptr(var_info.addr) # 取得目前指標值
+                    new_addr = self.memory.ptr_add(old_addr, -1, "char") # 指標運算：char* 減 1 實際上地址減 1
+                    self.memory.set_ptr(var_info.addr, new_addr)
+                    return char_ptr(new_addr) # 回傳減 1 後的指標值
                 else:
                     raise Exception(f"Runtime error: Unsupported variable type {var_info.var_type} for variable '{ast_node.operand.name}' at line {ast_node.line}.")
                 
@@ -182,15 +318,53 @@ class Interpreter:
                 return 1 if left_val or right_val else 0
             # 非短路運算再求右子表達式
             right_val = self.evaluate(ast_node.right)
+            if ast_node.operator in ("+", "-"):
+                # 陣列在加減運算中 decay 成首元素指標，例如 arr + 1 等同 &arr[0] + 1。
+                left_val = self.decay_array_value(left_val)
+                right_val = self.decay_array_value(right_val)
             if ast_node.operator == "+":
-                # 這裡對每個運算子都檢查左右兩邊的值是否為 int（或 char 以 int 形式），確保類型正確才進行運算，否則丟出錯誤訊息。
-                if not isinstance(left_val, (int)) or not isinstance(right_val, (int)):
-                    raise Exception(f"Runtime error: Cannot apply operator '+' to {type_mapping[type(left_val).__name__]} and {type_mapping[type(right_val).__name__]} at line {ast_node.line}.")
-                return left_val + right_val
+                if isinstance(left_val, int) and isinstance(right_val, int):
+                    return left_val + right_val
+                # 指標加整數會依 pointed type 做 stride：int* 每格 4 bytes，char* 每格 1 byte。
+                if isinstance(left_val, int_ptr) and isinstance(right_val, int):
+                    return int_ptr(self.memory.ptr_add(left_val.addr, right_val, "int"))
+                if isinstance(left_val, char_ptr) and isinstance(right_val, int):
+                    return char_ptr(self.memory.ptr_add(left_val.addr, right_val, "char"))
+                # C 允許整數放在左邊，例如 2 + p，語意同 p + 2。
+                if isinstance(left_val, int) and isinstance(right_val, int_ptr):
+                    return int_ptr(self.memory.ptr_add(right_val.addr, left_val, "int"))
+                if isinstance(left_val, int) and isinstance(right_val, char_ptr):
+                    return char_ptr(self.memory.ptr_add(right_val.addr, left_val, "char"))
+                raise Exception(f"Runtime error: Cannot apply operator '+' to {type_mapping[type(left_val).__name__]} and {type_mapping[type(right_val).__name__]} at line {ast_node.line}.")
             elif ast_node.operator == "-":
-                if not isinstance(left_val, (int)) or not isinstance(right_val, (int)):
-                    raise Exception(f"Runtime error: Cannot apply operator '-' to {type_mapping[type(left_val).__name__]} and {type_mapping[type(right_val).__name__]} at line {ast_node.line}.")
-                return left_val - right_val
+                if isinstance(left_val, int) and isinstance(right_val, int):
+                    return left_val - right_val
+                # ptr - int 回傳同型指標，offset 轉成負值後交給 ptr_add() 做 stride 與邊界檢查。
+                if isinstance(left_val, int_ptr) and isinstance(right_val, int):
+                    return int_ptr(self.memory.ptr_add(left_val.addr, -right_val, "int"))
+                if isinstance(left_val, char_ptr) and isinstance(right_val, int):
+                    return char_ptr(self.memory.ptr_add(left_val.addr, -right_val, "char"))
+                # ptr - ptr 回傳元素距離，不是 byte 距離；兩個指標必須同型且位於同一 allocation。
+                if isinstance(left_val, int_ptr) and isinstance(right_val, int_ptr):
+                    left_alloc = self.memory.find_allocation(left_val.addr)
+                    right_alloc = self.memory.find_allocation(right_val.addr)
+                    if left_alloc is None or right_alloc is None:
+                        raise Exception(f"Runtime error: Cannot subtract invalid int* pointers at line {ast_node.line}.")
+                    if left_alloc != right_alloc:
+                        raise Exception(f"Runtime error: Cannot subtract int* pointers from different allocations at line {ast_node.line}.")
+                    byte_diff = left_val.addr - right_val.addr
+                    if byte_diff % 4 != 0:
+                        raise Exception(f"Runtime error: Cannot subtract unaligned int* pointers at line {ast_node.line}.")
+                    return byte_diff // 4
+                if isinstance(left_val, char_ptr) and isinstance(right_val, char_ptr):
+                    left_alloc = self.memory.find_allocation(left_val.addr)
+                    right_alloc = self.memory.find_allocation(right_val.addr)
+                    if left_alloc is None or right_alloc is None:
+                        raise Exception(f"Runtime error: Cannot subtract invalid char* pointers at line {ast_node.line}.")
+                    if left_alloc != right_alloc:
+                        raise Exception(f"Runtime error: Cannot subtract char* pointers from different allocations at line {ast_node.line}.")
+                    return left_val.addr - right_val.addr
+                raise Exception(f"Runtime error: Cannot apply operator '-' to {type_mapping[type(left_val).__name__]} and {type_mapping[type(right_val).__name__]} at line {ast_node.line}.")
             elif ast_node.operator == "*":
                 if not isinstance(left_val, (int)) or not isinstance(right_val, (int)):
                     raise Exception(f"Runtime error: Cannot apply operator '*' to {type_mapping[type(left_val).__name__]} and {type_mapping[type(right_val).__name__]} at line {ast_node.line}.")
@@ -200,13 +374,13 @@ class Interpreter:
                     raise Exception(f"Runtime error: Cannot apply operator '/' to {type_mapping[type(left_val).__name__]} and {type_mapping[type(right_val).__name__]} at line {ast_node.line}.")
                 if right_val == 0:
                     raise Exception(f"Runtime error: Division by zero at line {ast_node.line}.")
-                return left_val // right_val
+                return c_div(left_val, right_val)
             elif ast_node.operator == "%":
                 if not isinstance(left_val, (int)) or not isinstance(right_val, (int)):
                     raise Exception(f"Runtime error: Cannot apply operator '%' to {type_mapping[type(left_val).__name__]} and {type_mapping[type(right_val).__name__]} at line {ast_node.line}.")
                 if right_val == 0:
                     raise Exception(f"Runtime error: Modulo by zero at line {ast_node.line}.")
-                return left_val % right_val
+                return c_mod(left_val, right_val)
             elif ast_node.operator == "&":
                 if not isinstance(left_val, (int)) or not isinstance(right_val, (int)):
                     raise Exception(f"Runtime error: Cannot apply operator '&' to {type_mapping[type(left_val).__name__]} and {type_mapping[type(right_val).__name__]} at line {ast_node.line}.")
@@ -267,7 +441,7 @@ class Interpreter:
                 if isinstance(args[-1], array):
                     # 如果參數是字串常數，將其轉換成 char_ptr 傳給內建函式。
                     if args[-1].elem_type == 'char':
-                        args[-1] = char_ptr(args[-1].addr, args[-1].length)
+                        args[-1] = char_ptr(args[-1].addr)
                     elif args[-1].elem_type == 'int':
                         args[-1] = int_ptr(args[-1].addr)
                     else:
@@ -290,24 +464,36 @@ class Interpreter:
 
                 element_size = symtable.sizeof_type(ast_node.var_type)
                 total_size = ast_node.array_size * element_size
-                addr = self.memory.alloc_global(total_size)
-                self.symtable.define_array(ast_node.name, ast_node.var_type, addr, ast_node.array_size, ast_node.line)
+                # 先求值並檢查初始化內容，避免初始化失敗後仍留下已註冊的陣列變數。
+                init_values = None
+                string_value = None
 
                 if isinstance(ast_node.init_expr, parser.InitList):
+                    init_values = []
                     for index, value_expr in enumerate(ast_node.init_expr.values):
                         value = self.evaluate(value_expr)
                         if not isinstance(value, int):
                             raise Exception(f"Runtime error: Cannot initialize array '{ast_node.name}' element {index} with value of type {type_mapping[type(value).__name__]} at line {ast_node.line}.")
-                        self.memory.array_write(addr, index, ast_node.var_type, value)
+                        init_values.append(value)
                 elif isinstance(ast_node.init_expr, parser.String):
                     if ast_node.var_type != "char":
                         raise Exception(f"Runtime error: String initializer is only valid for char array '{ast_node.name}' at line {ast_node.line}.")
-                    for index, ch in enumerate(ast_node.init_expr.value):
-                        self.memory.array_write(addr, index, "char", ord(ch))
-                    if len(ast_node.init_expr.value) < ast_node.array_size:
-                        self.memory.array_write(addr, len(ast_node.init_expr.value), "char", 0)
+                    string_value = ast_node.init_expr.value
                 elif ast_node.init_expr is not None:
                     raise Exception(f"Runtime error: Unsupported initializer for array '{ast_node.name}' at line {ast_node.line}.")
+
+                # 初始化資料確認合法後，才真正配置記憶體並加入符號表。
+                addr = self.memory.alloc_global(total_size)
+                self.symtable.define_array(ast_node.name, ast_node.var_type, addr, ast_node.array_size, ast_node.line)
+
+                if init_values is not None:
+                    for index, value in enumerate(init_values):
+                        self.memory.array_write(addr, index, ast_node.var_type, value)
+                elif string_value is not None:
+                    for index, ch in enumerate(string_value):
+                        self.memory.array_write(addr, index, "char", ord(ch))
+                    if len(string_value) < ast_node.array_size:
+                        self.memory.array_write(addr, len(string_value), "char", 0)
 
                 return None # 陣列宣告敘述不產生數值回傳
 
@@ -323,84 +509,129 @@ class Interpreter:
                 size = 4 # 在 32 位元環境中，指標大小為 4 bytes
             else:
                 raise Exception(f"Runtime error: Unsupported variable type {ast_node.var_type} for variable '{ast_node.name}' at line {ast_node.line}.")
+            init_val = None
+            if ast_node.init_expr is not None:
+                # 宣告的右側可能引用未定義變數或型別不合；先驗證，成功後才建立新變數。
+                init_val = self.evaluate(ast_node.init_expr)
+                if ast_node.var_type in ("int*", "char*"):
+                    init_val = self.decay_array_value(init_val)
+                valid_init = (
+                    (ast_node.var_type == "int" and isinstance(init_val, int))
+                    or (ast_node.var_type == "char" and isinstance(init_val, int))
+                    or (ast_node.var_type == "int*" and isinstance(init_val, int_ptr))
+                    or (ast_node.var_type == "char*" and isinstance(init_val, char_ptr))
+                )
+                if not valid_init:
+                    if ast_node.var_type in ("int*", "char*") and isinstance(init_val, int):
+                        raise Exception(f"Runtime error: Cannot initialize pointer '{ast_node.name}' with integer value {init_val}; omit initializer for NULL pointer at line {ast_node.line}.")
+                    raise Exception(f"Runtime error: Cannot initialize variable '{ast_node.name}' of type {ast_node.var_type} with value of type {type_mapping[type(init_val).__name__]} at line {ast_node.line}.")
+
             addr = self.memory.alloc_global(size)
-            
-            # 2. 註冊進符號表
+
+            # 初始值已經驗證成功後才註冊變數，避免錯誤宣告污染符號表。
             self.symtable.define_var(ast_node.name, ast_node.var_type, addr, ast_node.line)
-            
-            # 3. 如果有給初始值，算出來並寫入記憶體
-            if ast_node.init_expr:
-                val = self.evaluate(ast_node.init_expr)
-                if ast_node.var_type == "int" and isinstance(val, (int)):
-                    self.memory.set_int(addr, val)
-                elif ast_node.var_type == "char" and isinstance(val, (int)):
-                    self.memory.set_char(addr, val)
-                else:
-                    raise Exception(f"Runtime error: Cannot initialize variable '{ast_node.name}' of type {ast_node.var_type} with value of type {type_mapping[type(val).__name__]} at line {ast_node.line}.")
+
+            if init_val is not None:
+                if ast_node.var_type == "int":
+                    self.memory.set_int(addr, init_val)
+                elif ast_node.var_type == "char":
+                    self.memory.set_char(addr, init_val)
+                elif ast_node.var_type == "int*":
+                    self.memory.set_ptr(addr, init_val.addr)
+                elif ast_node.var_type == "char*":
+                    self.memory.set_ptr(addr, init_val.addr)
             return None # 宣告敘述不產生數值回傳
         elif isinstance(ast_node, parser.Identifier):
             # 變數取值：先查符號表拿位址，再從記憶體讀值
             var_info = self.symtable.lookup_var(ast_node.name)
+            if var_info.is_array:
+                # 陣列名稱在 expression 中先保留成 array 物件，函式呼叫時再 decay 成 pointer。
+                return array(var_info.addr, var_info.array_length, var_info.var_type)
             if var_info.var_type == 'int':
                 return self.memory.get_int(var_info.addr)
             elif var_info.var_type == 'char':
                 return self.memory.get_char(var_info.addr)
             elif var_info.var_type == 'int*':
                 target_addr = self.memory.get_ptr(var_info.addr) # 先讀出指標變數本身的值（也就是它指向的地址）
-                return int_ptr(target_addr,target_addr,var_info.size)
+                return int_ptr(target_addr)
             elif var_info.var_type == 'char*': 
                 target_addr = self.memory.get_ptr(var_info.addr) # 先讀出指標變數本身的值（也就是它指向的地址）
-                return char_ptr(target_addr,target_addr,var_info.size)
+                return char_ptr(target_addr)
             else:
                 raise Exception(f"Runtime error: Unsupported variable type {var_info.var_type} for variable '{ast_node.name}' at line {ast_node.line}.")
         elif isinstance(ast_node, parser.IndexExpr):
-            # 目前只支援一維陣列讀取，例如 a[i]；指標索引與多維陣列之後再補。
-            if not isinstance(ast_node.base, parser.Identifier):
-                raise Exception(f"Runtime error: Array index base must be a variable at line {ast_node.line}.")
-
-            var_info = self.symtable.lookup_var(ast_node.base.name)
-            if not var_info.is_array:
-                raise Exception(f"Runtime error: Variable '{ast_node.base.name}' is not an array at line {ast_node.line}.")
-
+            # C 中 p[i] 等同 *(p + i)，因此 base 可以是陣列，也可以是 int*/char* 指標 expression。
+            base_val = self.evaluate(ast_node.base)
             index = self.evaluate(ast_node.index)
             if not isinstance(index, int):
                 raise Exception(f"Runtime error: Array index must be int at line {ast_node.line}.")
 
-            return self.memory.array_read(var_info.addr, index, var_info.var_type)
+            if isinstance(base_val, array):
+                return self.memory.array_read(base_val.addr, index, base_val.elem_type)
+            if isinstance(base_val, int_ptr):
+                target_addr = self.memory.ptr_add(base_val.addr, index, "int")
+                self.memory.check_ptr(target_addr, 4)
+                return self.memory.get_int(target_addr)
+            if isinstance(base_val, char_ptr):
+                target_addr = self.memory.ptr_add(base_val.addr, index, "char")
+                self.memory.check_ptr(target_addr, 1)
+                return self.memory.get_char(target_addr)
+            raise Exception(f"Runtime error: Cannot apply index operator to {type_mapping[type(base_val).__name__]} at line {ast_node.line}.")
         elif isinstance(ast_node, parser.AssignmentExpr):
-            # 指定運算：目前我們只處理左邊是單純變數名的情況
-            if not isinstance(ast_node.left, parser.Identifier):
-                raise Exception(f"Runtime error: Left side of assignment must be a variable at line {ast_node.line}")
-            
-            var_info = self.symtable.lookup(ast_node.left.name)
+            # 指定運算統一透過左值解析取得寫入地址，因此支援 x、*p、arr[i]、p[i]。
+            target_addr, target_type = self.resolve_lvalue(ast_node.left)
             right_val = self.evaluate(ast_node.right)
-            
+            if target_type in ("int*", "char*"):
+                right_val = self.decay_array_value(right_val)
             # 取得舊值 (用以支援 +=, -= 等複合運算)
-            old_val = 0
+            old_val = None
             if ast_node.operator != "=":
-                if var_info['type'] == 'int': old_val = self.memory.get_int(var_info['addr'])
-                elif var_info['type'] == 'char': old_val = self.memory.get_char(var_info['addr'])
-            
+                old_val = self.read_lvalue(target_addr, target_type)
             # 算出新值
-            if ast_node.operator == "=": new_val = right_val
-            elif ast_node.operator == "+=": new_val = old_val + right_val
-            elif ast_node.operator == "-=": new_val = old_val - right_val
-            elif ast_node.operator == "*=": new_val = old_val * right_val
+            if ast_node.operator == "=": 
+                if target_type == 'int*' or target_type == 'char*':
+                    if isinstance(right_val, int):
+                        raise Exception(f"Runtime error: Cannot assign integer value {right_val} to {target_type} at line {ast_node.line}.")
+                new_val = right_val
+            elif ast_node.operator == "+=": 
+                if isinstance(old_val, int) and isinstance(right_val, int):
+                    new_val = old_val + right_val
+                # p += n 等同 p = p + n，位移與邊界檢查交給 ptr_add()。
+                elif isinstance(old_val, int_ptr) and isinstance(right_val, int):
+                    new_val = int_ptr(self.memory.ptr_add(old_val.addr, right_val, "int"))
+                elif isinstance(old_val, char_ptr) and isinstance(right_val, int):
+                    new_val = char_ptr(self.memory.ptr_add(old_val.addr, right_val, "char"))
+                else:
+                    raise Exception(f"Runtime error: Cannot apply operator '+=' to {type_mapping[type(old_val).__name__]} and {type_mapping[type(right_val).__name__]} at line {ast_node.line}.")
+            elif ast_node.operator == "-=": 
+                if isinstance(old_val, int) and isinstance(right_val, int):
+                    new_val = old_val - right_val
+                # p -= n 使用負 offset，仍保留 int*/char* 各自的 stride。
+                elif isinstance(old_val, int_ptr) and isinstance(right_val, int):
+                    new_val = int_ptr(self.memory.ptr_add(old_val.addr, -right_val, "int"))
+                elif isinstance(old_val, char_ptr) and isinstance(right_val, int):
+                    new_val = char_ptr(self.memory.ptr_add(old_val.addr, -right_val, "char"))
+                else:
+                    raise Exception(f"Runtime error: Cannot apply operator '-=' to {type_mapping[type(old_val).__name__]} and {type_mapping[type(right_val).__name__]} at line {ast_node.line}.")
+            elif ast_node.operator == "*=":
+                if not isinstance(old_val, (int)) or not isinstance(right_val, (int)):
+                    raise Exception(f"Runtime error: Cannot apply operator '*=' to {type_mapping[type(old_val).__name__]} and {type_mapping[type(right_val).__name__]} at line {ast_node.line}.") 
+                new_val = old_val * right_val
             elif ast_node.operator == "/=":
+                if not isinstance(old_val, (int)) or not isinstance(right_val, (int)):
+                    raise Exception(f"Runtime error: Cannot apply operator '/=' to {type_mapping[type(old_val).__name__]} and {type_mapping[type(right_val).__name__]} at line {ast_node.line}.")
                 if right_val == 0:
                     raise Exception(f"Runtime error: Division by zero at line {ast_node.line}.")
-                new_val = old_val // right_val
+                new_val = c_div(old_val, right_val)
             elif ast_node.operator == "%=": 
+                if not isinstance(old_val, (int)) or not isinstance(right_val, (int)):
+                    raise Exception(f"Runtime error: Cannot apply operator '%=' to {type_mapping[type(old_val).__name__]} and {type_mapping[type(right_val).__name__]} at line {ast_node.line}.")
                 if right_val == 0:
                     raise Exception(f"Runtime error: Modulo by zero at line {ast_node.line}.")
-                new_val = old_val % right_val
+                new_val = c_mod(old_val, right_val)
             
             # 寫入記憶體
-            if var_info['type'] == 'int':
-                self.memory.set_int(var_info['addr'], new_val)
-            elif var_info['type'] == 'char':
-                self.memory.set_char(var_info['addr'], new_val)
-                
+            self.write_lvalue(target_addr, target_type, new_val, ast_node.line)
             return new_val
         
         elif isinstance(ast_node, parser.EmptyStmt):

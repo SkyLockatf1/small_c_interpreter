@@ -1,6 +1,7 @@
 # Stride lookup，鏡像 symtable.sizeof_type，避免 memory.py 反向 import symtable
 # 導致潛在循環 import 問題。
 _SIZEOF = {'int': 4, 'char': 1, 'int*': 4, 'char*': 4}
+_NULL_RESERVED_SIZE = 4
 
 def _sizeof_type(var_type: str) -> int:
     if var_type not in _SIZEOF:
@@ -10,43 +11,48 @@ def _sizeof_type(var_type: str) -> int:
 
 class VirtualMemory:
     def __init__(self, size=65536):
+        if size <= _NULL_RESERVED_SIZE:
+            raise RuntimeError("Runtime error: memory size must be greater than NULL reserved area")
         # 使用 bytearray 模擬 64KB 連續位址空間
         self.mem = bytearray(size)
         self.size = size
-        self.global_top = 0      # 全域區目前用到的最高位址，從左往右增長
+        self.global_top = _NULL_RESERVED_SIZE      # 保留地址 0 作為 NULL，避免合法物件配置在 0
         self.stack_top = size    # 堆疊區目前用到的最低位址，從右往左縮減
         self.allocations = {}    # addr -> size，記錄所有活躍的 allocation
+
+    def _check_access_range(self, addr: int, access_size: int):
+        """確認直接記憶體讀寫範圍落在 bytearray 內。"""
+        if access_size < 0:
+            raise RuntimeError("Memory Access Violation: negative access size")
+        if (access_size > 0 and addr < _NULL_RESERVED_SIZE) or addr + access_size > self.size:
+            raise RuntimeError("Memory Access Violation: Out of bounds")
 
     # ── int 讀寫 ──────────────────────────────────────────────────────────────
 
     def set_int(self, addr: int, value: int):
         """寫入 32-bit signed int（小端序）。超出範圍時截斷，不丟 OverflowError。"""
-        if addr + 4 > self.size:
-            raise RuntimeError("Memory Access Violation: Out of bounds")
+        self._check_access_range(addr, 4)
         # 32-bit signed wrap-around：(value + 2^31) % 2^32 - 2^31
         value = (value + 2**31) % 2**32 - 2**31
         self.mem[addr:addr+4] = value.to_bytes(4, 'little', signed=True)
 
     def get_int(self, addr: int) -> int:
         """讀取 32-bit signed int（小端序）。"""
-        if addr + 4 > self.size:
-            raise RuntimeError("Memory Access Violation: Out of bounds")
+        self._check_access_range(addr, 4)
         return int.from_bytes(self.mem[addr:addr+4], 'little', signed=True)
 
     # ── char 讀寫 ─────────────────────────────────────────────────────────────
 
     def set_char(self, addr: int, value):
         """寫入 8-bit char，接受整數或單字元字串，自動截斷為低 8 位元。"""
-        if addr + 1 > self.size:
-            raise RuntimeError("Memory Access Violation: Out of bounds")
+        self._check_access_range(addr, 1)
         if isinstance(value, str):
             value = ord(value)
         self.mem[addr] = value & 0xFF
 
     def get_char(self, addr: int) -> int:
         """讀取 8-bit char，回傳有號整數（-128 ~ 127）。"""
-        if addr + 1 > self.size:
-            raise RuntimeError("Memory Access Violation: Out of bounds")
+        self._check_access_range(addr, 1)
         val = self.mem[addr]
         return val - 256 if val > 127 else val
 
@@ -73,26 +79,29 @@ class VirtualMemory:
 
     def get_ptr(self, addr: int) -> int:
         """讀取儲存在 addr 的指標值（4-byte unsigned little-endian）。"""
-        if addr + 4 > self.size:
-            raise RuntimeError("Memory Access Violation: Out of bounds")
+        self._check_access_range(addr, 4)
         return int.from_bytes(self.mem[addr:addr+4], 'little', signed=False)
 
     def set_ptr(self, addr: int, ptr_val: int):
         """寫入指標值到 addr（4-byte unsigned little-endian）。"""
-        if addr + 4 > self.size:
-            raise RuntimeError("Memory Access Violation: Out of bounds")
+        self._check_access_range(addr, 4)
         if ptr_val < 0:
             raise RuntimeError("Runtime error: Pointer value cannot be negative")
+        if ptr_val >= self.size:
+            raise RuntimeError(f"Runtime error: Pointer value out of memory range ({ptr_val})")
         self.mem[addr:addr+4] = ptr_val.to_bytes(4, 'little', signed=False)
 
     # ── 配置 ──────────────────────────────────────────────────────────────────
 
     def alloc_global(self, size: int) -> int:
         """在全域區（左側）分配 size bytes，回傳起始位址。"""
+        if size <= 0:
+            raise RuntimeError("Runtime error: allocation size must be greater than 0")
         addr = self.global_top
-        self.global_top += size
-        if self.global_top >= self.stack_top:
+        new_top = self.global_top + size
+        if new_top > self.stack_top:
             raise RuntimeError("Runtime error: out of memory (Stack-Heap collision)")
+        self.global_top = new_top
         self.allocations[addr] = size
         return addr
 
@@ -103,9 +112,12 @@ class VirtualMemory:
           舊版：addr = stack_top (65536) → set_int(65536) 超出 bytearray 範圍
           新版：stack_top -= size → addr = stack_top (65532) → 合法
         """
-        self.stack_top -= size
-        if self.global_top >= self.stack_top:
+        if size <= 0:
+            raise RuntimeError("Runtime error: allocation size must be greater than 0")
+        new_top = self.stack_top - size
+        if self.global_top > new_top:
             raise RuntimeError("Runtime error: out of memory (Stack Overflow)")
+        self.stack_top = new_top
         addr = self.stack_top
         self.allocations[addr] = size
         return addr
@@ -144,13 +156,22 @@ class VirtualMemory:
         """計算 ptr_val + offset * stride，對應 C 的 p + n 或 p - n（offset 可為負）。
 
         stride 由 _sizeof_type(elem_type) 決定，支援 'int'/'char'/'int*'/'char*'。
-        只驗證結果在合法記憶體範圍內，不強制在同一 allocation 內。
+        指標位移後仍必須留在原本所屬的同一個 allocation 內，避免跳到隔壁變數。
         """
+        if ptr_val < _NULL_RESERVED_SIZE:
+            raise RuntimeError("Runtime error: invalid pointer arithmetic")
+
+        result = self.find_allocation(ptr_val)
+        if result is None:
+            raise RuntimeError(f"Runtime error: invalid pointer arithmetic at {ptr_val:#x}")
+
+        base, size = result
         stride = _sizeof_type(elem_type)
         new_addr = ptr_val + offset * stride
-        if new_addr < 0 or new_addr >= self.size:
+        if new_addr < base or new_addr + stride > base + size:
             raise RuntimeError(
-                f"Runtime error: Pointer arithmetic out of bounds ({new_addr})"
+                f"Runtime error: pointer arithmetic out of allocation "
+                f"({new_addr:#x}, allocation [{base:#x}, {base + size:#x}))"
             )
         return new_addr
 
@@ -173,6 +194,14 @@ class VirtualMemory:
         比 check_bounds 更方便：呼叫方不需要知道 base_addr，
         find_allocation 會自動從任意地址找到所屬的 allocation。
         """
+        if access_size < 0:
+            raise RuntimeError("Runtime error: pointer access size cannot be negative")
+        if access_size == 0:
+            return
+        if addr == 0:
+            raise RuntimeError("Runtime error: null pointer dereference")
+        if addr < _NULL_RESERVED_SIZE:
+            raise RuntimeError(f"Runtime error: invalid memory access at {addr:#x}")
         result = self.find_allocation(addr)
         if result is None:
             raise RuntimeError(
@@ -190,6 +219,8 @@ class VirtualMemory:
 
         base_addr 必須是 allocation 的起始位址（allocations dict 的 key）。
         """
+        if element_size <= 0:
+            raise RuntimeError("Runtime error: element size must be greater than 0")
         if base_addr not in self.allocations:
             raise RuntimeError(
                 f"Runtime error: invalid memory access at {target_addr}"
@@ -210,15 +241,13 @@ class VirtualMemory:
         優先以 find_allocation 找到所屬 allocation 的邊界作為上限，
         防止讀入相鄰 allocation 的資料。找不到時才用 max_len 作為保護上限。
         """
-        if addr < 0 or addr >= self.size:
-            raise RuntimeError(f"Runtime error: invalid string address {addr:#x}")
+        if max_len <= 0:
+            raise RuntimeError("Runtime error: invalid string read size")
+        self.check_ptr(addr, 1)
 
         result = self.find_allocation(addr)
-        if result is not None:
-            base, size = result
-            limit = base + size
-        else:
-            limit = min(addr + max_len, self.size)
+        base, size = result
+        limit = min(base + size, addr + max_len)
 
         chars = []
         pos = addr
@@ -242,6 +271,8 @@ class VirtualMemory:
         """
         encoded = s.encode('ascii')
         needed = len(encoded) + 1  # 含結尾 \0
+        if max_len <= 0:
+            raise RuntimeError("Runtime error: invalid string buffer size")
         if needed > max_len:
             raise RuntimeError(
                 f"Runtime error: buffer overflow: string length {len(encoded)} "
@@ -259,15 +290,10 @@ class VirtualMemory:
         """
         encoded = string_content.encode('ascii')
         size_needed = len(encoded) + 1
-        addr = self.global_top
-
-        if addr + size_needed > self.size:
-            raise RuntimeError("Runtime error: memory overflow while allocating string")
+        addr = self.alloc_global(size_needed)
 
         self.mem[addr:addr + len(encoded)] = encoded
         self.mem[addr + len(encoded)] = 0
-        self.allocations[addr] = size_needed
-        self.global_top += size_needed
         return addr
 
     def set_string(self, string_content: str) -> int:
@@ -278,8 +304,10 @@ class VirtualMemory:
 
     def reset(self, size=65536):
         """清空記憶體與所有配置紀錄，供 NEW 指令重置執行環境時使用。"""
+        if size <= _NULL_RESERVED_SIZE:
+            raise RuntimeError("Runtime error: memory size must be greater than NULL reserved area")
         self.mem = bytearray(size)
         self.size = size
-        self.global_top = 0
+        self.global_top = _NULL_RESERVED_SIZE
         self.stack_top = size
         self.allocations = {}

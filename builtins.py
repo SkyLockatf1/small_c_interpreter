@@ -11,6 +11,16 @@ type_mapping = {
     'None': 'void',
 }
 
+def _c_div(left: int, right: int) -> int:
+    """C-style integer division: truncate toward zero."""
+    quotient = abs(left) // abs(right)
+    return -quotient if (left < 0) != (right < 0) else quotient
+
+
+def _c_mod(left: int, right: int) -> int:
+    """C-style remainder: same sign as dividend."""
+    return left - _c_div(left, right) * right
+
 # void puts(char* str);
 def puts(vm: VirtualMemory, str: char_ptr) -> None:
     if type(str) is not char_ptr:
@@ -160,7 +170,7 @@ def mod(a: int, b: int) -> int:
         raise Exception(f"Runtime error: mod expects int for second argument, got {got_type}")
     if b == 0:
         raise Exception("Runtime error: division by zero")
-    return a % b
+    return _c_mod(a, b)
 
 def rand() -> int:
     return random.randint(0, 32767)
@@ -240,9 +250,9 @@ def itoa(vm: VirtualMemory, value: int, char_str: char_ptr) -> None:
         got_type = type_mapping.get(type(char_str).__name__, type(char_str).__name__)
         raise Exception(f"Runtime error: itoa expects char* for str, got {got_type}")
     # 先將整數轉為字串，然後寫入 char_str 指向的記憶體位置，最後加上結束符號 '\0'。
+    # 寫入範圍由 VirtualMemory.check_ptr() 依 allocation 邊界驗證。
     s = str(value)
-    max_len = char_str.length if char_str.length > 0 else len(s) + 1
-    vm.write_cstring(char_str.addr, s, max_len)
+    vm.write_cstring(char_str.addr, s, len(s) + 1)
 
 # void strcpy(char* dest, char* src);
 def strcpy(vm: VirtualMemory, dest: char_ptr, src: char_ptr) -> None:
@@ -253,10 +263,8 @@ def strcpy(vm: VirtualMemory, dest: char_ptr, src: char_ptr) -> None:
         got_type = type_mapping.get(type(src).__name__, type(src).__name__)
         raise Exception(f"Runtime error: strcpy expects char* for src, got {got_type}")
     s = vm.read_cstring(src.addr)
-    # dest.length > 0 時強制 buffer size 限制；為 0（未知）時交由 write_cstring 內的
-    # check_ptr 驗證 allocation 邊界，max_len 給剛好容納 src 的大小。
-    max_len = dest.length if dest.length > 0 else len(s) + 1
-    vm.write_cstring(dest.addr, s, max_len)
+    # 寫入範圍由 VirtualMemory.check_ptr() 依 allocation 邊界驗證。
+    vm.write_cstring(dest.addr, s, len(s) + 1)
 
 # int strcmp(char* s1, char* s2);
 def strcmp(vm: VirtualMemory, s1: char_ptr, s2: char_ptr) -> int:
