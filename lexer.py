@@ -26,11 +26,12 @@ punctuator= [";","(",")","{","}","[","]",",",".","?",":"]
 class lexer:
     """將原始程式碼字串切分成 token 串列的詞法分析器。"""
 
-    def __init__(self,codes: str):
+    def __init__(self,codes: str, macro_definitions: dict[str, str] | None = None):
         self.codes: str = codes
         self.position: int = 0
         self.line: int = 1
-        self.macro_definitions: dict[str,str] = {}
+        # REPL 會傳入同一份 dict，讓 #define 巨集可跨多次輸入沿用。
+        self.macro_definitions: dict[str,str] = macro_definitions if macro_definitions is not None else {}
         self.tokens: list[token] = []
     def _current_char(self):
         return self.codes[self.position]

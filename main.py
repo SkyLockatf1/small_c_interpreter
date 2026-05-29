@@ -143,6 +143,7 @@ if __name__ == "__main__":
     buffer = []  # 原本的 program buffer
     # ... 初始化你的實例 ...
     interpreter_instance = interpreter.Interpreter()
+    macro_definitions: dict[str, str] = {} # 儲存巨集定義的字典，key 是巨集名稱，value 是巨集展開後的內容
     while True:
         try:
             raw_input = input("sc> ").strip()
@@ -182,6 +183,7 @@ if __name__ == "__main__":
             elif cmd == "NEW":
                 buffer.clear()
                 interpreter_instance = interpreter.Interpreter()
+                macro_definitions.clear()
             elif cmd == "LOAD":
                 pass
             elif cmd == "SAVE":
@@ -202,21 +204,75 @@ if __name__ == "__main__":
                 else:
                     raise Exception(f"Runtime error: Invalid format '{args}'. Use 'ON' to enable or 'OFF' to disable tracing.")
                 pass
+            elif cmd == "FUNCS":
+                functions = list(interpreter_instance.symtable.iter_functions())
+                if not functions:
+                    print("No functions defined.")
+                else:
+                    for function in functions:
+                        params = []
+                        for param in function.params:
+                            # 函式表保留原始陣列參數宣告，因此 FUNCS 顯示 int a[]，
+                            # 實際呼叫時才在 interpreter 內退化成 int* / char*。
+                            if param.is_array:
+                                params.append(f"{param.var_type} {param.name}[]")
+                            else:
+                                params.append(f"{param.var_type} {param.name}")
+                        print(f"{function.return_type} {function.name}({', '.join(params)})")
             elif cmd == "VARS":
-                table = interpreter_instance.symtable.table
-                if not table:
+                # VARS 只顯示目前全域變數；函式呼叫期間的區域變數不列入驗收輸出。
+                variables = list(interpreter_instance.symtable.iter_vars())
+                vm = interpreter_instance.memory
+                if not variables:
                     print("No variables defined.")
                 else:
-                    for name, info in table.items():
-                        var_type = info['type']
-                        addr = info['addr']
-                        if var_type == 'int':
-                            val = interpreter_instance.memory.get_int(addr)
+                    for symbol in variables:
+                        name = symbol.name
+                        var_type = symbol.var_type
+                        addr = symbol.addr
+                        if symbol.is_array:
+                            # 陣列需顯示長度與前十個元素；超過十個元素用 ... 省略。
+                            values = []
+                            shown_count = min(symbol.array_length, 10)
+                            for index in range(shown_count):
+                                value = vm.array_read(addr, index, var_type)
+                                # char 陣列同時顯示數值與可讀字元，方便檢查字串內容與 \0。
+                                if var_type == 'char' and value == 0:
+                                    values.append("0 ('\\0')")
+                                elif var_type == 'char' and value == 10:
+                                    values.append("10 ('\\n')")
+                                elif var_type == 'char' and value == 9:
+                                    values.append("9 ('\\t')")
+                                elif var_type == 'char' and 32 <= value <= 126:
+                                    values.append(f"{value} ('{chr(value)}')")
+                                else:
+                                    values.append(str(value))
+                            if symbol.array_length > 10:
+                                values.append("...")
+                            print(f"{var_type} {name}[{symbol.array_length}] = {{{', '.join(values)}}}")
+                        elif var_type == 'int':
+                            val = vm.get_int(addr)
                             print(f"int {name} = {val}")
                         elif var_type == 'char':
-                            val = interpreter_instance.memory.get_char(addr)
-                            # 仿照範例輸出： char ch = 65 ('A')
-                            print(f"char {name} = {val} ('{chr(val)}')")
+                            # char 以整數值為主，若是常見可顯示字元則附上字元形式。
+                            val = vm.get_char(addr)
+                            if val == 0:
+                                print(f"char {name} = {val} ('\\0')")
+                            elif val == 10:
+                                print(f"char {name} = {val} ('\\n')")
+                            elif val == 9:
+                                print(f"char {name} = {val} ('\\t')")
+                            elif 32 <= val <= 126:
+                                print(f"char {name} = {val} ('{chr(val)}')")
+                            else:
+                                print(f"char {name} = {val}")
+                        elif var_type == 'int*' or var_type == 'char*':
+                            # 指標變數的目前值就是其指向位址；0 視為 NULL。
+                            ptr = vm.get_ptr(addr)
+                            ptr_text = "NULL" if ptr == 0 else f"0x{ptr:04x}"
+                            print(f"{var_type} {name} = {ptr_text}")
+                        else:
+                            print(f"{var_type} {name} = <unsupported>")
             
             
             # 2. 如果不是環境指令，才視為 Small-C 程式碼執行
@@ -228,14 +284,13 @@ if __name__ == "__main__":
                     pending_buffer += next_line + "\n"
                     buffer.append(next_line)
                 # 執行 Lexer, Parser...
-                lexer_instance = lexer.lexer(pending_buffer)
+                lexer_instance = lexer.lexer(pending_buffer, macro_definitions)
                 tokens = lexer_instance.tokenize()
                 parser_instance = parser.parser(tokens)
                 program = parser_instance.parse()
                 for ast in program:
                     print("AST:", ast) # 這行可以幫助你確認 AST 結構是否正確，之後可以註解掉。
                     result = interpreter_instance.evaluate(ast)
-                # print("Result:", result)
 
         except Exception as e:
             print(e)

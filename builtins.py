@@ -1,5 +1,4 @@
 import math
-import random
 from memory import VirtualMemory
 from extra_c_type import char_ptr
 
@@ -172,8 +171,18 @@ def mod(a: int, b: int) -> int:
         raise Exception("Runtime error: division by zero")
     return _c_mod(a, b)
 
-def rand() -> int:
-    return random.randint(0, 32767)
+def rand(rng) -> int:
+    if not hasattr(rng, "randint"):
+        raise Exception("Runtime error: rand expects RNG with randint")
+    return rng.randint(0, 32767)
+
+def srand(rng, seed: int) -> None:
+    if not hasattr(rng, "seed"):
+        raise Exception("Runtime error: srand expects RNG with seed")
+    if type(seed) is not int:
+        got_type = type_mapping.get(type(seed).__name__, type(seed).__name__)
+        raise Exception(f"Runtime error: srand expects int, got {got_type}")
+    rng.seed(seed)
 
 # memory and string functions
 

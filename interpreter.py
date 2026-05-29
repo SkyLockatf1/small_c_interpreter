@@ -1,6 +1,7 @@
 import importlib.util
 import os
 import inspect
+import random
 import parser
 import memory
 import symtable as symtable
@@ -57,6 +58,12 @@ class BreakSignal(Exception):
 class ContinueSignal(Exception):
     pass
 
+class ReturnSignal(Exception):
+    """函式內 return 用的控制流程訊號，攜帶回傳值往外層 CallExpr 傳遞。"""
+    def __init__(self, value, line):
+        self.value = value
+        self.line = line
+
 class Interpreter:
     """執行 AST 的狀態容器。"""
 
@@ -65,16 +72,21 @@ class Interpreter:
         self.memory: memory.VirtualMemory = memory.VirtualMemory()
         self.symtable: symtable.symtable = symtable.symtable()
         self.trace_enabled = False # 之後實作 TRACE 指令時會用到
-        self.randseed = None # 之後實作 rand() 時會用到
+        self._rng = random.Random(1)
+        self.randseed = 1
 
     def decay_array_value(self, value):
         """將 expression 中的陣列值轉成首元素指標，對應 C 的 array-to-pointer decay。"""
+        # 不是陣列的值不需要轉換，例如 int、int_ptr、char_ptr 都直接保留原值。
         if not isinstance(value, array):
             return value
+        # int arr[] 在 expression / argument / pointer assignment 中退化成 int*，指向 arr[0]。
         if value.elem_type == "int":
             return int_ptr(value.addr)
+        # char array 與 string literal 都用 array(..., "char") 表示，因此會退化成 char*。
         if value.elem_type == "char":
             return char_ptr(value.addr)
+        # 目前專案不支援 pointer array 等其他元素型別，避免靜默轉成錯誤 pointer。
         raise Exception(f"Runtime error: Unsupported array element type {value.elem_type}.")
 
     def resolve_lvalue(self, expr):
@@ -171,6 +183,77 @@ class Interpreter:
             return
         raise Exception(f"Runtime error: Unsupported lvalue type {value_type} at line {line}.")
 
+    def alloc_for_current_scope(self, size: int) -> int:
+        """全域宣告配置在 global 區；函式 scope 內的變數配置在 stack frame。"""
+        if self.symtable.current_scope_level() == 0:
+            return self.memory.alloc_global(size)
+        return self.memory.alloc_stack(size)
+
+    def effective_param_type(self, param):
+        """陣列參數在 C 中會退化成指標參數，例如 int a[] 視為 int*。"""
+        if param.is_array:
+            base_type = param.param_type if hasattr(param, "param_type") else param.var_type
+            if base_type.endswith("*"):
+                raise Exception(f"Runtime error: Pointer array parameter '{param.name}' is not supported at line {getattr(param, 'line', '?')}.")
+            return base_type + "*"
+        return param.param_type if hasattr(param, "param_type") else param.var_type
+
+    def validate_value_for_type(self, value, expected_type: str, line: int, context: str):
+        """檢查值是否可用於指定型別；pointer 目標會先套用 array-to-pointer decay。"""
+        if expected_type in ("int*", "char*"):
+            value = self.decay_array_value(value)
+        valid = (
+            (expected_type == "int" and isinstance(value, int))
+            or (expected_type == "char" and isinstance(value, int))
+            or (expected_type == "int*" and isinstance(value, int_ptr))
+            or (expected_type == "char*" and isinstance(value, char_ptr))
+            or (expected_type == "void" and value is None)
+        )
+        if not valid:
+            raise Exception(f"Runtime error: Cannot use value of type {type_mapping[type(value).__name__]} as {expected_type} for {context} at line {line}.")
+        return value
+
+    def call_user_function(self, function_name: str, arg_values: list, line: int):
+        """呼叫使用者定義函式：建立參數 scope、執行 body，並處理 return 值。"""
+        # 從函式表取得先前由 FunctionDef 註冊的簽名與 body。
+        func = self.symtable.lookup_function(function_name)
+        if len(arg_values) != len(func.params):
+            raise Exception(f"Runtime error: Function '{function_name}' expects {len(func.params)} arguments, got {len(arg_values)} at line {line}.")
+
+        # 記住呼叫前 stack_top，函式返回時會釋放本次呼叫配置的所有參數與區域變數。
+        frame_entry_top = self.memory.stack_top
+        self.symtable.push_scope()
+        try:
+            for param, arg_value in zip(func.params, arg_values):
+                param_type = self.effective_param_type(param)
+                # 參數先做型別檢查；陣列實參已在 CallExpr 階段 decay 成對應 pointer。
+                arg_value = self.validate_value_for_type(arg_value, param_type, line, f"parameter '{param.name}'")
+                # 每個參數都配置成目前函式 scope 內的一個 stack 變數，後續可被直接讀寫。
+                addr = self.memory.alloc_stack(symtable.sizeof_type(param_type))
+                self.symtable.define_var(param.name, param_type, addr, line)
+                self.write_lvalue(addr, param_type, arg_value, line)
+
+            try:
+                # 執行函式 body；return 會以 ReturnSignal 方式跳出巢狀 block / if / loop。
+                self.evaluate(func.body)
+            except ReturnSignal as signal:
+                if func.return_type == "void":
+                    if signal.value is not None:
+                        raise Exception(f"Runtime error: Void function '{function_name}' should not return a value at line {signal.line}.")
+                    return None
+                if signal.value is None:
+                    raise Exception(f"Runtime error: Function '{function_name}' must return {func.return_type} at line {signal.line}.")
+                # 非 void 函式要檢查 return value 是否符合宣告回傳型別。
+                return self.validate_value_for_type(signal.value, func.return_type, signal.line, f"return from '{function_name}'")
+
+            if func.return_type != "void":
+                raise Exception(f"Runtime error: Function '{function_name}' ended without returning {func.return_type} at line {line}.")
+            return None
+        finally:
+            # 無論正常 return 或執行期錯誤，都必須復原 scope 與 stack frame，避免污染後續 REPL 狀態。
+            self.symtable.pop_scope()
+            self.memory.free_stack_frame(frame_entry_top)
+
     def evaluate(self, ast_node):
         # 根據 AST 節點型別遞迴求值，回傳此節點在目前執行環境中的值。
         if isinstance(ast_node, parser.Number):
@@ -213,23 +296,13 @@ class Interpreter:
                     else:
                         raise Exception(f"Runtime error: Unsupported variable type {var_info.var_type} for variable '{ast_node.operand.name}' at line {ast_node.line}.")
                 elif isinstance(ast_node.operand, parser.IndexExpr):
-                    if not isinstance(ast_node.operand.base, parser.Identifier):
-                        raise Exception(f"Runtime error: Cannot apply unary '&' to non-array element at line {ast_node.line}.")
-                    var_info = self.symtable.lookup_var(ast_node.operand.base.name)
-                    if not var_info.is_array:
-                        raise Exception(f"Runtime error: Variable '{ast_node.operand.base.name}' is not an array at line {ast_node.line}.")
-                    index = self.evaluate(ast_node.operand.index)
-                    if not isinstance(index, int):
-                        raise Exception(f"Runtime error: Array index must be int at line {ast_node.line}.")
-                    element_size = symtable.sizeof_type(var_info.var_type)
-                    target_addr = var_info.addr + index * element_size
-                    self.memory.check_bounds(var_info.addr, target_addr, element_size)
-                    if var_info.var_type == "int":
+                    target_addr, target_type = self.resolve_lvalue(ast_node.operand)
+                    if target_type == "int":
                         return int_ptr(target_addr)
-                    elif var_info.var_type == "char":
+                    elif target_type == "char":
                         return char_ptr(target_addr)
                     else:
-                        raise Exception(f"Runtime error: Unsupported array element type {var_info.var_type} for variable '{ast_node.operand.base.name}' at line {ast_node.line}.")
+                        raise Exception(f"Runtime error: Cannot take address of {target_type} expression at line {ast_node.line}.")
                 else:
                     raise Exception(f"Runtime error: Cannot apply unary '&' to non-variable at line {ast_node.line}.")
             elif ast_node.operator == "*":
@@ -426,10 +499,8 @@ class Interpreter:
                     raise Exception(f"Runtime error: Cannot compare {type_mapping[type(left_val).__name__]} and {type_mapping[type(right_val).__name__]} with '>=' at line {ast_node.line}.")
                 return 1 if left_val >= right_val else 0
         elif isinstance(ast_node,parser.CallExpr):
-            # 函式呼叫會先求出所有參數，再分流到內建函式或使用者自訂函式。
-            """目前只實作內建函式的呼叫邏輯，使用 Python 的 getattr 從 c_builtins 模組找到對應函式並呼叫。
-            之後要實作 user-defined 函式的呼叫邏輯，從符號表查函式定義，建立新的執行環境，執行函式體等。
-            缺少對參數類型與數量的檢查，以及對 return 值的處理，目前先假設內建函式都能正確被呼叫，且 user-defined 函式的呼叫邏輯尚未實作。"""
+            # Function call：先求出所有實參，再分流到內建函式或使用者自訂函式。
+            # 內建函式透過 c_builtins 呼叫；使用者函式交給 call_user_function() 建立 scope/stack frame。
             if not isinstance(ast_node.fn, parser.Identifier):
                 raise Exception(f"Runtime error: Function name must be an identifier at line {ast_node.line}.")
             print("func call:", ast_node.fn, "args:", ast_node.args)
@@ -437,23 +508,39 @@ class Interpreter:
             args = []
             return_value = None
             for arg in ast_node.args:
-                args.append(self.evaluate(arg))
-                if isinstance(args[-1], array):
-                    # 如果參數是字串常數，將其轉換成 char_ptr 傳給內建函式。
-                    if args[-1].elem_type == 'char':
-                        args[-1] = char_ptr(args[-1].addr)
-                    elif args[-1].elem_type == 'int':
-                        args[-1] = int_ptr(args[-1].addr)
-                    else:
-                        raise Exception(f"Runtime error: Unsupported array element type {args[-1].elem_type} for argument at line {ast_node.line}.")
+                # Function call 的實參一律先套用 array-to-pointer decay：
+                #   "abc" -> char*、char buf[] -> char*、int arr[] -> int*。
+                # 這樣 built-in 與 user-defined function 都共用同一套參數轉換規則。
+                args.append(self.decay_array_value(self.evaluate(arg)))
+            if function_name == "rand":
+                if len(args) != 0:
+                    raise Exception(f"Runtime error: rand expects 0 arguments, got {len(args)} at line {ast_node.line}.")
+                return c_builtins.rand(self._rng)
+            if function_name == "srand":
+                if len(args) != 1:
+                    raise Exception(f"Runtime error: srand expects 1 argument, got {len(args)} at line {ast_node.line}.")
+                if not isinstance(args[0], int):
+                    got_type = type_mapping.get(type(args[0]).__name__, type(args[0]).__name__)
+                    raise Exception(f"Runtime error: srand expects int, got {got_type} at line {ast_node.line}.")
+                self.randseed = args[0]
+                return c_builtins.srand(self._rng, args[0])
             if function_name in builtins_funcs:
                 if function_name in str_funcs:
                     return_value = getattr(c_builtins,function_name)(self.memory,*args)
                 else:
                     return_value = getattr(c_builtins,function_name)(*args)
             else:
-                pass # 這裡要實作呼叫 user-defined 函式的邏輯，從符號表查函式定義，建立新的執行環境，執行函式體等
+                return_value = self.call_user_function(function_name, args, ast_node.line)
             return return_value
+        elif isinstance(ast_node, parser.FunctionDef):
+            # 函式定義只註冊到函式表，不會立即執行 body。
+            params = []
+            for param in ast_node.params:
+                # 函式表保留原始參數宣告型態，讓 FUNCS 可顯示 int a[] 而不是 int* a。
+                # 實際呼叫時再由 effective_param_type() 將陣列參數退化成 pointer。
+                params.append(symtable.ParamSymbol(param.name, param.param_type, param.is_array))
+            self.symtable.define_function(ast_node.name, ast_node.return_type, params, ast_node.body, ast_node.line)
+            return None
         elif isinstance(ast_node, parser.VarDecl):
             if ast_node.is_array:
                 # 陣列目前只支援 int/char 元素；指標陣列先保守拒絕，避免 memory.write() 無法處理。
@@ -483,7 +570,7 @@ class Interpreter:
                     raise Exception(f"Runtime error: Unsupported initializer for array '{ast_node.name}' at line {ast_node.line}.")
 
                 # 初始化資料確認合法後，才真正配置記憶體並加入符號表。
-                addr = self.memory.alloc_global(total_size)
+                addr = self.alloc_for_current_scope(total_size)
                 self.symtable.define_array(ast_node.name, ast_node.var_type, addr, ast_node.array_size, ast_node.line)
 
                 if init_values is not None:
@@ -526,7 +613,7 @@ class Interpreter:
                         raise Exception(f"Runtime error: Cannot initialize pointer '{ast_node.name}' with integer value {init_val}; omit initializer for NULL pointer at line {ast_node.line}.")
                     raise Exception(f"Runtime error: Cannot initialize variable '{ast_node.name}' of type {ast_node.var_type} with value of type {type_mapping[type(init_val).__name__]} at line {ast_node.line}.")
 
-            addr = self.memory.alloc_global(size)
+            addr = self.alloc_for_current_scope(size)
 
             # 初始值已經驗證成功後才註冊變數，避免錯誤宣告污染符號表。
             self.symtable.define_var(ast_node.name, ast_node.var_type, addr, ast_node.line)
@@ -690,6 +777,10 @@ class Interpreter:
         elif isinstance(ast_node, parser.ContinueStmt):
             # 交給外層最近的迴圈處理。
             raise ContinueSignal()
+        elif isinstance(ast_node, parser.ReturnStmt):
+            # return 不在這裡直接結束 evaluate；改用 ReturnSignal 交給最近的 CallExpr 接住。
+            value = None if ast_node.expr is None else self.evaluate(ast_node.expr)
+            raise ReturnSignal(value, ast_node.line)
         elif isinstance(ast_node, parser.Block):
             # 區塊按順序執行其中每一個語句。
             for stmt in ast_node.statements:
