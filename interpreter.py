@@ -503,7 +503,7 @@ class Interpreter:
             # 內建函式透過 c_builtins 呼叫；使用者函式交給 call_user_function() 建立 scope/stack frame。
             if not isinstance(ast_node.fn, parser.Identifier):
                 raise Exception(f"Runtime error: Function name must be an identifier at line {ast_node.line}.")
-            print("func call:", ast_node.fn, "args:", ast_node.args)
+            # print("func call:", ast_node.fn, "args:", ast_node.args)
             function_name = ast_node.fn.name
             args = []
             return_value = None
