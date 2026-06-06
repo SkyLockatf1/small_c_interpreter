@@ -47,7 +47,8 @@ def handle_delete(buffer: list, args: str):
 
 def handle_insert(buffer: list, args: str):
     n = parse_line_args(args, "INSERT", allow_empty=False, allow_range=False)
-    repl.INSERT(buffer, n[0])
+    return repl.INSERT(buffer, n[0])  # 透傳 bool，讓呼叫端決定是否設 is_dirty
+
  
 def check_input_complete(pending_buffer: str) -> bool:
     """只判斷 REPL 是否還需要續行；語法錯誤交給 lexer/parser 處理。"""
@@ -140,7 +141,8 @@ if __name__ == "__main__":
 # ║  >> [XXXXXX]                                                                 ║
 # ╚══════════════════════════════════════════════════════════════════════════════╝
 # """)
-    buffer = []  # 原本的 program buffer
+    buffer = []       # 程式碼緩衝區，儲存所有已輸入的 Small-C 程式行
+    is_dirty = False  # 追蹤緩衝區是否有未儲存的修改
     # ... 初始化你的實例 ...
     interpreter_instance = interpreter.Interpreter()
     macro_definitions: dict[str, str] = {} # 儲存巨集定義的字典，key 是巨集名稱，value 是巨集展開後的內容
@@ -156,6 +158,14 @@ if __name__ == "__main__":
 
             # 1. 處理環境指令
             if cmd == "EXIT" or cmd == "QUIT":
+                # 若有未儲存修改，離開前先詢問使用者確認
+                if is_dirty:
+                    confirm = input(
+                        "Buffer has unsaved changes. Quit anyway? [y/N]: "
+                    ).strip().lower()
+                    if confirm != "y":
+                        print("Quit cancelled.")
+                        continue
                 break
             elif cmd == "CLEAR":
                 repl.CLEAR()
@@ -167,28 +177,50 @@ if __name__ == "__main__":
                 handle_list(buffer, args)
             elif cmd == "DELETE":
                 handle_delete(buffer, args)
+                is_dirty = True  # 刪除後標記為已修改
             elif cmd == "INSERT":
-                handle_insert(buffer, args)
+                # INSERT 回傳 True 才代表有實際插入內容
+                if handle_insert(buffer, args):
+                    is_dirty = True
             elif cmd == "EDIT":
                 m_single = re.fullmatch(RE_SINGLE, args)
                 if m_single:
                     n = int(m_single.group(1))
-                    repl.EDIT(buffer, n)
+                    # EDIT 回傳 True 才代表使用者有實際更改內容
+                    if repl.EDIT(buffer, n):
+                        is_dirty = True
                 else:
                     raise Exception(f"Runtime error: Invalid format '{args}'. Use 'n' for editing a specific line.")
             elif cmd == "APPEND":
-                repl.APPEND(buffer)
+                # APPEND 回傳 True 才代表有實際追加內容
+                if repl.APPEND(buffer):
+                    is_dirty = True
             elif cmd == "RUN":
                 pass
             elif cmd == "NEW":
+                # 若有未儲存修改，先詢問使用者是否確認放棄
+                if is_dirty:
+                    confirm = input(
+                        "Buffer has unsaved changes. Discard all and start fresh? [y/N]: "
+                    ).strip().lower()
+                    if confirm != "y":
+                        print("NEW cancelled.")
+                        continue
                 buffer.clear()
                 interpreter_instance = interpreter.Interpreter()
                 macro_definitions.clear()
+                is_dirty = False  # 清除後緩衝區乾淨
             elif cmd == "LOAD":
-                pass
+                if args:
+                    # LOAD 成功後 is_dirty 重設為 False；使用者取消則維持原值
+                    if repl.LOAD(buffer, args, is_dirty):
+                        is_dirty = False
+                else:
+                    raise Exception("Runtime error: LOAD requires a filename. Usage: LOAD <filename>")
             elif cmd == "SAVE":
                 if args:
                     repl.SAVE(buffer, args)
+                    is_dirty = False  # 儲存成功後緩衝區乾淨
                 else:
                     raise Exception(f"Runtime error: Invalid format '{args}'. Use 'filename' for saving the program.")
             elif cmd == "TRACE":
@@ -300,6 +332,7 @@ if __name__ == "__main__":
             else:
                 pending_buffer = raw_input + "\n" # 先把第一行程式碼存進 buffer，後續如果不完整再繼續讀取
                 buffer.append(raw_input) # 只有程式碼才存進 buffer (依規範而定)
+                is_dirty = True  # 輸入程式碼後標記為已修改
                 while not check_input_complete(pending_buffer):
                     next_line = input(">>> ").strip()
                     pending_buffer += next_line + "\n"
