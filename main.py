@@ -48,6 +48,59 @@ def handle_delete(buffer: list, args: str):
 def handle_insert(buffer: list, args: str):
     n = parse_line_args(args, "INSERT", allow_empty=False, allow_range=False)
     repl.INSERT(buffer, n[0])
+
+def analyze_program(source: str, macro_definitions: dict[str, str]) -> list:
+    """執行共用的 lexer/parser 分析流程，回傳最外層 AST 節點。"""
+    lexer_instance = lexer.lexer(source, macro_definitions)
+    tokens = lexer_instance.tokenize()
+    parser_instance = parser.parser(tokens)
+    return parser_instance.parse()
+
+def program_has_main(program: list) -> bool:
+    """檢查完整程式 AST 是否定義了 main()。"""
+    return any(isinstance(ast, parser.FunctionDef) and ast.name == "main" for ast in program)
+
+def load_program_declarations(runtime: interpreter.Interpreter, program: list) -> None:
+    """只載入完整程式的函式定義與全域宣告，不執行 top-level 裸露語句。"""
+    for ast in program:
+        if isinstance(ast, parser.FunctionDef):
+            runtime.evaluate(ast)
+    for ast in program:
+        if isinstance(ast, parser.VarDecl):
+            runtime.evaluate(ast)
+
+def run_program_buffer(buffer: list[str], macro_definitions: dict[str, str], trace_enabled: bool) -> interpreter.Interpreter | None:
+    """使用全新的 runtime，從 main() 執行目前的程式緩衝區。"""
+    if not buffer:
+        print("Error: no program to run.")
+        return None
+
+    source = "\n".join(buffer) + "\n"
+    program = analyze_program(source, dict(macro_definitions))
+    if not program_has_main(program):
+        print("Error: main function not found.")
+        return None
+
+    runtime = interpreter.Interpreter()
+    runtime.trace_enabled = trace_enabled
+    load_program_declarations(runtime, program)
+
+    main_call = parser.CallExpr(parser.Identifier("main", 0), [], 0)
+    return_value = runtime.evaluate(main_call)
+    if return_value is None:
+        return_value = 0
+    print(f"Program exited with return value {return_value}.")
+    return runtime
+
+def check_program_buffer(buffer: list[str], macro_definitions: dict[str, str]) -> None:
+    """只檢查目前程式緩衝區的 lexer/parser 錯誤，不執行程式。"""
+    if not buffer:
+        print("Error: no program to check.")
+        return
+
+    source = "\n".join(buffer) + "\n"
+    analyze_program(source, dict(macro_definitions))
+    print("No errors found.")
  
 def check_input_complete(pending_buffer: str) -> bool:
     """只判斷 REPL 是否還需要續行；語法錯誤交給 lexer/parser 處理。"""
@@ -179,7 +232,12 @@ if __name__ == "__main__":
             elif cmd == "APPEND":
                 repl.APPEND(buffer)
             elif cmd == "RUN":
-                pass
+                trace_enabled = interpreter_instance.trace_enabled
+                next_interpreter = run_program_buffer(buffer, macro_definitions, trace_enabled)
+                if next_interpreter is not None:
+                    interpreter_instance = next_interpreter
+            elif cmd == "CHECK":
+                check_program_buffer(buffer, macro_definitions)
             elif cmd == "NEW":
                 buffer.clear()
                 interpreter_instance = interpreter.Interpreter()
@@ -305,12 +363,8 @@ if __name__ == "__main__":
                     pending_buffer += next_line + "\n"
                     buffer.append(next_line)
                 # 執行 Lexer, Parser...
-                lexer_instance = lexer.lexer(pending_buffer, macro_definitions)
-                tokens = lexer_instance.tokenize()
-                parser_instance = parser.parser(tokens)
-                program = parser_instance.parse()
+                program = analyze_program(pending_buffer, macro_definitions)
                 for ast in program:
-                    print("AST:", ast) # 這行可以幫助你確認 AST 結構是否正確，之後可以註解掉。
                     result = interpreter_instance.evaluate(ast)
 
         except Exception as e:

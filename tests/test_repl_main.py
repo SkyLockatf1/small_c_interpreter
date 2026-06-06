@@ -151,6 +151,207 @@ class TestCheckInputComplete:
         assert main.check_input_complete("") is True
 
 
+class TestRunCommand:
+    """測試 RUN 指令是否能在 REPL 中從 main() 執行程式緩衝區。"""
+
+    def run_repl(self, monkeypatch, capsys, commands):
+        inputs = iter(commands)
+        monkeypatch.setattr("builtins.input", lambda prompt="": next(inputs))
+        runpy.run_path("main.py", run_name="__main__")
+        return capsys.readouterr().out
+
+    def test_run_empty_buffer_reports_error(self, monkeypatch, capsys):
+        out = self.run_repl(monkeypatch, capsys, ["RUN", "QUIT"])
+
+        assert "Error: no program to run." in out
+
+    def test_run_basic_main_prints_and_returns_zero(self, monkeypatch, capsys):
+        out = self.run_repl(monkeypatch, capsys, [
+            "int main() {",
+            'printf("hello\\n");',
+            "return 0;",
+            "}",
+            "RUN",
+            "QUIT",
+        ])
+
+        assert "hello" in out
+        assert "Program exited with return value 0." in out
+        assert "AST:" not in out
+
+    def test_run_uses_main_return_value(self, monkeypatch, capsys):
+        out = self.run_repl(monkeypatch, capsys, [
+            "int main() {",
+            "return 7;",
+            "}",
+            "RUN",
+            "QUIT",
+        ])
+
+        assert "Program exited with return value 7." in out
+
+    def test_run_without_main_reports_error(self, monkeypatch, capsys):
+        out = self.run_repl(monkeypatch, capsys, [
+            "int add(int a, int b) {",
+            "return a + b;",
+            "}",
+            "RUN",
+            "QUIT",
+        ])
+
+        assert "Error: main function not found." in out
+
+    def test_run_without_main_does_not_execute_top_level_statement(self, monkeypatch, capsys):
+        out = self.run_repl(monkeypatch, capsys, [
+            "APPEND",
+            'printf("should not run\\n");',
+            ".",
+            "RUN",
+            "QUIT",
+        ])
+
+        assert "Error: main function not found." in out
+        assert "should not run" not in out
+
+    def test_run_with_main_skips_top_level_statement(self, monkeypatch, capsys):
+        out = self.run_repl(monkeypatch, capsys, [
+            "APPEND",
+            'printf("top level should not run\\n");',
+            "int main() {",
+            'printf("main only\\n");',
+            "return 0;",
+            "}",
+            ".",
+            "RUN",
+            "QUIT",
+        ])
+
+        assert "top level should not run" not in out
+        assert "main only" in out
+        assert "Program exited with return value 0." in out
+
+    def test_run_twice_uses_fresh_runtime_each_time(self, monkeypatch, capsys):
+        out = self.run_repl(monkeypatch, capsys, [
+            "int counter = 0;",
+            "int main() {",
+            "counter = counter + 1;",
+            'printf("counter=%d\\n", counter);',
+            "return counter;",
+            "}",
+            "RUN",
+            "RUN",
+            "QUIT",
+        ])
+
+        assert out.count("counter=1") == 2
+        assert out.count("Program exited with return value 1.") == 2
+
+    def test_run_void_main_uses_zero_exit_code(self, monkeypatch, capsys):
+        out = self.run_repl(monkeypatch, capsys, [
+            "void main() {",
+            'printf("ok\\n");',
+            "}",
+            "RUN",
+            "QUIT",
+        ])
+
+        assert "ok" in out
+        assert "Program exited with return value 0." in out
+
+    def test_run_runtime_error_returns_to_repl_without_traceback(self, monkeypatch, capsys):
+        out = self.run_repl(monkeypatch, capsys, [
+            "int main() {",
+            'printf("%d\\n", 10 / 0);',
+            "return 0;",
+            "}",
+            "RUN",
+            "QUIT",
+        ])
+
+        assert "Runtime error" in out
+        assert "zero" in out.lower()
+        assert "Traceback" not in out
+
+
+class TestCheckCommand:
+    """測試 CHECK 指令只分析程式緩衝區，不執行 main()。"""
+
+    def run_repl(self, monkeypatch, capsys, commands):
+        inputs = iter(commands)
+        monkeypatch.setattr("builtins.input", lambda prompt="": next(inputs))
+        runpy.run_path("main.py", run_name="__main__")
+        return capsys.readouterr().out
+
+    def test_check_empty_buffer_reports_error(self, monkeypatch, capsys):
+        out = self.run_repl(monkeypatch, capsys, ["CHECK", "QUIT"])
+
+        assert "Error: no program to check." in out
+
+    def test_check_valid_program_reports_no_errors(self, monkeypatch, capsys):
+        out = self.run_repl(monkeypatch, capsys, [
+            "APPEND",
+            "int main() {",
+            'printf("ok\\n");',
+            "return 0;",
+            "}",
+            ".",
+            "CHECK",
+            "QUIT",
+        ])
+
+        assert "No errors found." in out
+        assert "ok" not in out
+
+    def test_check_does_not_execute_printf(self, monkeypatch, capsys):
+        out = self.run_repl(monkeypatch, capsys, [
+            "APPEND",
+            "int main() {",
+            'printf("this should not print\\n");',
+            "return 0;",
+            "}",
+            ".",
+            "CHECK",
+            "QUIT",
+        ])
+
+        assert "No errors found." in out
+        assert "this should not print" not in out
+
+    def test_check_syntax_error_reports_error_without_traceback(self, monkeypatch, capsys):
+        out = self.run_repl(monkeypatch, capsys, [
+            "APPEND",
+            "int main() {",
+            "int bad = ;",
+            "return 0;",
+            "}",
+            ".",
+            "CHECK",
+            "QUIT",
+        ])
+
+        assert "Syntax error" in out
+        assert "line 2" in out
+        assert "Traceback" not in out
+
+    def test_check_does_not_change_existing_runtime_state(self, monkeypatch, capsys):
+        out = self.run_repl(monkeypatch, capsys, [
+            "int x = 1;",
+            "APPEND",
+            "int main() {",
+            "x = 99;",
+            "return 0;",
+            "}",
+            ".",
+            "CHECK",
+            "VARS",
+            "QUIT",
+        ])
+
+        assert "No errors found." in out
+        assert "int x = 1" in out
+        assert "int x = 99" not in out
+
+
 class TestReplVarsScenario:
     """REPL-level tests for debugger/status commands."""
 
