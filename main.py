@@ -49,9 +49,9 @@ def handle_insert(buffer: list, args: str):
     n = parse_line_args(args, "INSERT", allow_empty=False, allow_range=False)
     repl.INSERT(buffer, n[0])
 
-def analyze_program(source: str, macro_definitions: dict[str, str]) -> list:
+def analyze_program(source: str, macro_definitions: dict[str, str], line_start: int = 1) -> list:
     """執行共用的 lexer/parser 分析流程，回傳最外層 AST 節點。"""
-    lexer_instance = lexer.lexer(source, macro_definitions)
+    lexer_instance = lexer.lexer(source, macro_definitions, line_start=line_start)
     tokens = lexer_instance.tokenize()
     parser_instance = parser.parser(tokens)
     return parser_instance.parse()
@@ -387,6 +387,7 @@ if __name__ == "__main__":
             
             # 2. 如果不是環境指令，才視為 Small-C 程式碼執行
             else:
+                line_start = len(buffer) + 1  # 本次輸入在 buffer 的起始行號
                 pending_buffer = raw_input + "\n" # 先把第一行程式碼存進 buffer，後續如果不完整再繼續讀取
                 buffer.append(raw_input) # 只有程式碼才存進 buffer (依規範而定)
                 is_dirty = True  # 輸入程式碼後標記為已修改
@@ -395,7 +396,7 @@ if __name__ == "__main__":
                     pending_buffer += next_line + "\n"
                     buffer.append(next_line)
                 # 執行 Lexer, Parser...
-                program = analyze_program(pending_buffer, macro_definitions)
+                program = analyze_program(pending_buffer, macro_definitions, line_start=line_start)
                 for ast in program:
                     result = interpreter_instance.evaluate(ast)
 
