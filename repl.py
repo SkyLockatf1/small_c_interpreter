@@ -128,12 +128,16 @@ def HELP(cmd: str = ""):
         print("========================================================================")
 
 # 進入多行追加模式，輸入單獨 "." 結束
-def APPEND(buffer:list[str]):
+# 回傳 True 表示有實際追加內容，False 表示使用者立即輸入 "." 而未修改 buffer
+def APPEND(buffer:list[str]) -> bool:
+    modified = False
     while True:
         new_code = input("Enter code to append (or '.' to finish): ").strip()
         if new_code == ".": # 空行結束輸入
             break
         buffer.append(new_code)
+        modified = True  # 至少追加了一行才標記為已修改
+    return modified
 
 # 依作業系統執行對應的清屏指令
 def CLEAR() -> None:
@@ -165,20 +169,22 @@ def LIST(buffer:list[str], args:list[int]) -> None:
             raise Exception(f"REPL error: Too many arguments for LIST. Expected 0, 1, or 2, got {len(args)}")
 
 # 編輯指定行；輸入空字串代表取消修改
-def EDIT(buffer: list[str], arg: int) -> None:
+# 回傳 True 表示有實際更改內容，False 表示使用者按 Enter 取消而未修改 buffer
+def EDIT(buffer: list[str], arg: int) -> bool:
     if len(buffer) == 0:
         raise Exception("REPL error: Program buffer is empty.")
-    else:
-        if arg < 1 or arg > len(buffer):
-            raise Exception(f"REPL error: Index {arg} out of bounds. Valid range is 1 to {len(buffer)}")
-        print(f"Current code at line {arg}: {buffer[arg-1]}")
-        new_code = input("Enter new code: ").strip()
-        if new_code == "":
-            return
-        buffer[arg-1] = new_code
+    if arg < 1 or arg > len(buffer):
+        raise Exception(f"REPL error: Index {arg} out of bounds. Valid range is 1 to {len(buffer)}")
+    print(f"Current code at line {arg}: {buffer[arg-1]}")
+    new_code = input("Enter new code: ").strip()
+    if new_code == "":
+        return False  # 使用者直接按 Enter 取消，未修改 buffer
+    buffer[arg-1] = new_code
+    return True  # 實際更改了內容
 
 # 在第 arg 行之前插入；arg=len(buffer)+1 代表尾端插入
-def INSERT(buffer: list[str], arg: int) -> None:
+# 回傳 True 表示有實際插入內容，False 表示使用者立即輸入 "." 而未修改 buffer
+def INSERT(buffer: list[str], arg: int) -> bool:
     if arg < 1 or arg > len(buffer)+1:
         raise Exception(f"REPL error: Index {arg} out of bounds. Valid range is 1 to {len(buffer)+1}")
     offset = 0
@@ -187,8 +193,9 @@ def INSERT(buffer: list[str], arg: int) -> None:
         if insert_code == ".":  # 空行結束輸入
             break
         # 使用 offset 保留多行插入的原始順序
-        buffer.insert(arg-1+offset,insert_code)
+        buffer.insert(arg-1+offset, insert_code)
         offset += 1
+    return offset > 0  # offset > 0 表示至少插入了一行
 
 # 刪除單行或範圍；範圍刪除採反向避免索引位移
 def DELETE(buffer: list[str], args: list[int]) -> None:
@@ -210,6 +217,45 @@ def DELETE(buffer: list[str], args: list[int]) -> None:
                 buffer.pop(i-1)
         else:
             raise Exception("REPL error: DELETE command requires 1 or 2 arguments.")
+def LOAD(buffer: list[str], filename: str, is_dirty: bool) -> bool:
+    """
+    從指定檔案載入 Small-C 原始碼至程式緩衝區。
+    
+    - 若緩衝區有未儲存修改（is_dirty=True），先詢問使用者是否放棄。
+    - 載入成功後顯示讀取行數，並回傳 True；取消或失敗則回傳 False。
+    """
+    if filename.strip() == "":
+        raise Exception("REPL error: LOAD requires a filename.")
+
+    # 若緩衝區有未儲存的修改，提示使用者確認後再覆蓋
+    if is_dirty:
+        confirm = input(
+            f"Buffer has unsaved changes. Discard and load '{filename}'? [y/N]: "
+        ).strip().lower()
+        if confirm != "y":
+            print("Load cancelled.")
+            return False  # 使用者選擇不放棄，載入取消
+
+    try:
+        with open(filename, "r", encoding="utf-8") as file:
+            lines = file.read().splitlines()  # 讀取所有行，保留空行，去除換行符號
+        # 清除現有緩衝區並載入新內容
+        buffer.clear()
+        buffer.extend(lines)
+        print(f"Loaded {len(buffer)} lines from '{filename}'.")
+        return True  # 載入成功
+    except FileNotFoundError:
+        raise Exception(f"REPL error: File '{filename}' not found.")
+    except PermissionError:
+        raise Exception(f"REPL error: Permission denied when reading '{filename}'.")
+    except UnicodeDecodeError:
+        raise Exception(
+            f"REPL error: '{filename}' is not valid UTF-8. "
+            "Please save the file as UTF-8 encoding and try again."
+        )
+    except OSError as error:
+        raise Exception(f"REPL error: Could not read '{filename}': {error}")
+
 def SAVE(buffer: list[str], filename: str) -> None:
     if len(buffer) == 0:
         raise Exception("REPL error: Program buffer is empty.")
