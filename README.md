@@ -94,7 +94,7 @@ sc> EXIT
 | `LOAD` | 尚未完成 | `main.py` 中目前仍為 `pass`。 |
 | `RUN` | 尚未完成 | `main.py` 中目前仍為 `pass`。 |
 | `CHECK` | 尚未完成 | 尚未接上 REPL 指令流程。 |
-| `HELP` | 尚未完成 | `repl.py` 中目前仍為空實作。 |
+| `HELP` | 已實作 | 支援 `HELP` 指令摘要與 `HELP <command>` 單一指令說明。 |
 
 ## Small-C 語言支援狀態
 
@@ -176,7 +176,6 @@ sc> EXIT
 - `LOAD` 指令。
 - `RUN` 指令。
 - `CHECK` 指令。
-- `HELP` 指令。
 - `scanf` 內建函式。
 - 完整 trace 輸出。
 - 完整 main function 執行流程。
@@ -254,7 +253,6 @@ tests/
 - `RUN` 尚未完成，因此完整 `.sc` 程式的載入與從 `main()` 執行流程尚不能作為完成狀態。
 - `LOAD` 尚未完成，因此目前無法直接從檔案載入程式緩衝區。
 - `CHECK` 尚未完成，因此目前尚無單獨語法 / 語意檢查流程。
-- `HELP` 尚未完成。
 - `scanf` 尚未實作。
 - `TRACE ON/OFF` 目前只切換狀態，尚未完整輸出每個 statement 的執行紀錄。
 - 目前沒有正式自動化測試器。
@@ -268,7 +266,6 @@ tests/
 | P0 | 完成 `RUN`，支援從 buffer parse 並執行 `main()`。 |
 | P0 | 完成 `LOAD`，支援讀取 `.sc` 檔案到 buffer。 |
 | P0 | 完成 `CHECK`，支援不執行程式的語法與語意檢查。 |
-| P0 | 完成 `HELP`，列出所有 REPL 指令與用法。 |
 | P1 | 補齊 `scanf`。 |
 | P1 | 完成 trace statement 輸出。 |
 | P1 | 建立 `tests/` 測試資料與自動化測試工具。 |

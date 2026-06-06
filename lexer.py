@@ -19,7 +19,7 @@ class token:
         self.type: token_type = type
         self.line: int = line
         self.value: str = value
-keywords = ["int","char","void","if","else","while","for","return","do","continue","break"]
+keywords = ["int","char","void","if","else","while","for","return","do","continue","break","switch","case","default"]
 operators = ["!","~","+", "-", "*", "/", "%", "<", ">", "=", "&", "^", "|"]
 operators_2 = ["++","--","==","!=","<=",">=","&&","||","<<",">>","+=","-=","*=","/=","%="]
 punctuator= [";","(",")","{","}","[","]",",",".","?",":"]

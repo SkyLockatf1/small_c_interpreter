@@ -201,6 +201,30 @@ class ForStmt:
     def __repr__(self):
         return f"ForStmt({self.init}, {self.condition}, {self.update}, {self.body})"
 
+class CaseClause:
+    """switch 內的一個 case/default 區段。
+
+    value 是 parser 階段折疊後的整數常數；default 使用 None。
+    statements 保留該 label 後直到下一個 case/default 前的語句，供 interpreter 支援 fall-through。
+    """
+    def __init__(self, value, statements: list, line: int, is_default=False):
+        self.value = value
+        self.statements = statements
+        self.line = line
+        self.is_default = is_default
+    def __repr__(self):
+        label = "default" if self.is_default else f"case {self.value}"
+        return f"CaseClause({label}, {self.statements})"
+
+class SwitchStmt:
+    """Switch 敘述 AST 節點，例如 switch (expr) { case 1: ... }。"""
+    def __init__(self, expr, clauses: list[CaseClause], line: int):
+        self.expr = expr
+        self.clauses = clauses
+        self.line = line
+    def __repr__(self):
+        return f"SwitchStmt({self.expr}, {self.clauses})"
+
 class BreakStmt:
     """Break 敘述 AST 節點。"""
     def __init__(self, line):
@@ -241,6 +265,7 @@ class parser:
         self.current_token: lexer.token = self.peek()
         self.program = []  # 用來存放多行程式碼的 AST，讓 REPL 可以一次執行整段程式碼
         self.loop_depth: int = 0
+        self.switch_depth: int = 0
         self.function_depth: int = 0
 
     def peek(self, offset=0):
@@ -393,12 +418,18 @@ class parser:
             return self.parse_do_while_statement()
         if self.check("for", lexer.token_type.keyword):
             return self.parse_for_statement()
+        if self.check("switch", lexer.token_type.keyword):
+            return self.parse_switch_statement()
         if self.check("break", lexer.token_type.keyword):
             return self.parse_break_statement()
         if self.check("continue", lexer.token_type.keyword):
             return self.parse_continue_statement()
         if self.check("return", lexer.token_type.keyword):
             return self.parse_return_statement()
+        if self.check("case", lexer.token_type.keyword):
+            self.error("'case' label is only allowed directly inside a switch statement")
+        if self.check("default", lexer.token_type.keyword):
+            self.error("'default' label is only allowed directly inside a switch statement")
 
         # 2. 處理獨立的區塊 { ... }
         if self.check("{", lexer.token_type.punctuator):
@@ -691,8 +722,8 @@ class parser:
         return expr
 
     def parse_unary(self):
-        """第 2 級：前綴一元運算 -、!、~、*、&、++、--，右結合。"""
-        operator = self.match_operator({"-", "!", "~", "*", "&", "++", "--"})
+        """第 2 級：前綴一元運算 +、-、!、~、*、&、++、--，右結合。"""
+        operator = self.match_operator({"+", "-", "!", "~", "*", "&", "++", "--"})
         if operator is not None:
             # 一元運算是右結合，因此 operand 繼續解析 parse_unary。
             return UnaryExpr(operator.value, self.parse_unary(), operator.line)
@@ -852,10 +883,167 @@ class parser:
             self.loop_depth -= 1
         return ForStmt(init, condition, update, body)
 
+    def parse_switch_statement(self):
+        """解析 switch (expr) { case CONST: ... default: ... }。
+
+        case label 在這裡會被折疊成 compile-time integer constant，接近 C 的限制；
+        switch 本身的控制 expression 仍保留為一般 runtime expression。
+        """
+        switch_token = self.advance() # 吃掉 'switch'
+        self.expect("(", lexer.token_type.punctuator)
+        expr = self.parse_expression()
+        self.expect(")", lexer.token_type.punctuator)
+        self.expect("{", lexer.token_type.punctuator)
+
+        clauses = []
+        seen_cases = set()
+        seen_default = False
+
+        self.switch_depth += 1
+        try:
+            while not self.check("}", lexer.token_type.punctuator) and not self.is_at_end():
+                if self.check("case", lexer.token_type.keyword):
+                    clause = self.parse_case_clause()
+                    if clause.value in seen_cases:
+                        raise Exception(f"Syntax error: Duplicate case label {clause.value} at line {clause.line}")
+                    seen_cases.add(clause.value)
+                    clauses.append(clause)
+                elif self.check("default", lexer.token_type.keyword):
+                    if seen_default:
+                        token = self.current_token
+                        raise Exception(f"Syntax error: Duplicate default label at line {token.line}")
+                    seen_default = True
+                    clauses.append(self.parse_default_clause())
+                elif self.check(";", lexer.token_type.punctuator):
+                    # 放寬 switch body 最外層的空敘述；lexer 不保留空白行，真正會留下來的是單獨的 ';'。
+                    self.advance()
+                else:
+                    # 除了空敘述外，switch body 最外層仍必須由 case/default label 組成，避免 label 前語句語意模糊。
+                    self.error("Expected 'case' or 'default' label in switch statement")
+            self.expect("}", lexer.token_type.punctuator)
+        finally:
+            self.switch_depth -= 1
+
+        return SwitchStmt(expr, clauses, switch_token.line)
+
+    def parse_case_clause(self):
+        """解析單一 case 區段，並把 label 驗證為整數常數表達式。"""
+        case_token = self.advance() # 吃掉 'case'
+        value_expr = self.parse_expression()
+        value = self.fold_int_constant_expr(value_expr, case_token.line)
+        self.expect(":", lexer.token_type.punctuator)
+        return CaseClause(value, self.parse_switch_clause_statements(), case_token.line)
+
+    def parse_default_clause(self):
+        """解析單一 default 區段。"""
+        default_token = self.advance() # 吃掉 'default'
+        self.expect(":", lexer.token_type.punctuator)
+        return CaseClause(None, self.parse_switch_clause_statements(), default_token.line, is_default=True)
+
+    def parse_switch_clause_statements(self):
+        """收集目前 case/default 後方的語句，直到下一個 label 或 switch 結尾。"""
+        statements = []
+        while (
+            not self.is_at_end()
+            and not self.check("case", lexer.token_type.keyword)
+            and not self.check("default", lexer.token_type.keyword)
+            and not self.check("}", lexer.token_type.punctuator)
+        ):
+            statements.append(self.parse_statement())
+        return statements
+
+    def fold_int_constant_expr(self, expr, line: int) -> int:
+        """將 case label 的 AST 折疊成 int；遇到變數、函式呼叫等 runtime expression 就報錯。"""
+        if isinstance(expr, Number):
+            return expr.value
+        if isinstance(expr, Char):
+            return ord(expr.value)
+        if isinstance(expr, UnaryExpr):
+            value = self.fold_int_constant_expr(expr.operand, line)
+            if expr.operator == "+":
+                return value
+            if expr.operator == "-":
+                return -value
+            if expr.operator == "~":
+                return ~value
+            if expr.operator == "!":
+                return 0 if value else 1
+            raise Exception(f"Syntax error: Unsupported unary operator '{expr.operator}' in case label at line {line}")
+        if isinstance(expr, BinaryExpr):
+            left = self.fold_int_constant_expr(expr.left, line)
+            # 常數表達式中的邏輯運算仍保留 C-like 短路，避免 1 || (1 / 0) 誤觸右側錯誤。
+            if expr.operator == "&&":
+                if not left:
+                    return 0
+                right = self.fold_int_constant_expr(expr.right, line)
+                return 1 if right else 0
+            if expr.operator == "||":
+                if left:
+                    return 1
+                right = self.fold_int_constant_expr(expr.right, line)
+                return 1 if right else 0
+            right = self.fold_int_constant_expr(expr.right, line)
+            return self.fold_int_constant_binary(expr.operator, left, right, line)
+        raise Exception(f"Syntax error: case label must be an integer constant expression at line {line}")
+
+    def fold_int_constant_binary(self, operator: str, left: int, right: int, line: int) -> int:
+        """處理 case 常數表達式中的二元運算，使用 C-like 整數除法與餘數。"""
+        if operator == "+":
+            return left + right
+        if operator == "-":
+            return left - right
+        if operator == "*":
+            return left * right
+        if operator == "/":
+            if right == 0:
+                raise Exception(f"Syntax error: Division by zero in case label at line {line}")
+            quotient = abs(left) // abs(right)
+            return -quotient if (left < 0) != (right < 0) else quotient
+        if operator == "%":
+            if right == 0:
+                raise Exception(f"Syntax error: Modulo by zero in case label at line {line}")
+            quotient = abs(left) // abs(right)
+            quotient = -quotient if (left < 0) != (right < 0) else quotient
+            return left - quotient * right
+        if operator == "<<":
+            # Python 對負數 shift count 會丟 ValueError；這裡先轉成 Small-C 的語法錯誤格式。
+            if right < 0:
+                raise Exception(f"Syntax error: Negative shift count in case label at line {line}")
+            return left << right
+        if operator == ">>":
+            # 同上，避免 case 常數折疊時漏出 Python 原生錯誤訊息。
+            if right < 0:
+                raise Exception(f"Syntax error: Negative shift count in case label at line {line}")
+            return left >> right
+        if operator == "<":
+            return 1 if left < right else 0
+        if operator == "<=":
+            return 1 if left <= right else 0
+        if operator == ">":
+            return 1 if left > right else 0
+        if operator == ">=":
+            return 1 if left >= right else 0
+        if operator == "==":
+            return 1 if left == right else 0
+        if operator == "!=":
+            return 1 if left != right else 0
+        if operator == "&":
+            return left & right
+        if operator == "^":
+            return left ^ right
+        if operator == "|":
+            return left | right
+        # && / || 已在 fold_int_constant_expr() 先做短路處理；這裡只保留防禦式 fallback。
+        if operator == "&&":
+            return 1 if left and right else 0
+        if operator == "||":
+            return 1 if left or right else 0
+        raise Exception(f"Syntax error: Unsupported operator '{operator}' in case label at line {line}")
+
     def parse_break_statement(self):
         """解析 break;"""
-        if self.loop_depth == 0:
-            self.error("'break' statement is only allowed inside a loop")
+        if self.loop_depth == 0 and self.switch_depth == 0:
+            self.error("'break' statement is only allowed inside a loop or switch")
         token = self.advance() # 吃掉 'break'
         self.expect(";", lexer.token_type.punctuator)
         return BreakStmt(token.line)

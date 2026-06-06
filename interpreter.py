@@ -50,6 +50,36 @@ for name, obj in inspect.getmembers(c_builtins, inspect.isfunction):
 # 字串相關函式需要讀寫虛擬記憶體，因此呼叫時會額外傳入 memory 物件。
 str_funcs = ["memset","strlen","strcmp","strcpy","strcat","printf","puts","scanf","atoi","itoa"]
 
+# 內建函式的 Small-C 可見簽名。
+# 參數型別與格式字串細節仍保留在 builtins.py 各函式內檢查；這裡只統一檢查
+# 呼叫端給的「參數數量」以及 Python 實作回傳值是否符合 Small-C 宣告型別。
+# max_args=None 代表可變參數函式，例如 printf/scanf 至少要有 format string。
+BUILTIN_SIGNATURES = {
+    "putchar": {"return_type": "int", "min_args": 1, "max_args": 1},
+    "getchar": {"return_type": "int", "min_args": 0, "max_args": 0},
+    "printf": {"return_type": "void", "min_args": 1, "max_args": None},
+    "puts": {"return_type": "void", "min_args": 1, "max_args": 1},
+    "scanf": {"return_type": "int", "min_args": 1, "max_args": None},
+    "strlen": {"return_type": "int", "min_args": 1, "max_args": 1},
+    "strcpy": {"return_type": "void", "min_args": 2, "max_args": 2},
+    "strcmp": {"return_type": "int", "min_args": 2, "max_args": 2},
+    "strcat": {"return_type": "void", "min_args": 2, "max_args": 2},
+    "abs": {"return_type": "int", "min_args": 1, "max_args": 1},
+    "max": {"return_type": "int", "min_args": 2, "max_args": 2},
+    "min": {"return_type": "int", "min_args": 2, "max_args": 2},
+    "pow": {"return_type": "int", "min_args": 2, "max_args": 2},
+    "sqrt": {"return_type": "int", "min_args": 1, "max_args": 1},
+    "mod": {"return_type": "int", "min_args": 2, "max_args": 2},
+    "rand": {"return_type": "int", "min_args": 0, "max_args": 0},
+    "srand": {"return_type": "void", "min_args": 1, "max_args": 1},
+    "memset": {"return_type": "void", "min_args": 3, "max_args": 3},
+    "sizeof_int": {"return_type": "int", "min_args": 0, "max_args": 0},
+    "sizeof_char": {"return_type": "int", "min_args": 0, "max_args": 0},
+    "atoi": {"return_type": "int", "min_args": 1, "max_args": 1},
+    "itoa": {"return_type": "void", "min_args": 2, "max_args": 2},
+    "exit": {"return_type": "void", "min_args": 1, "max_args": 1},
+}
+
 # break / continue 可能出現在巢狀 block 或 if 裡，
 # 用內部 signal 往外傳遞，直到最近的迴圈節點接住。
 class BreakSignal(Exception):
@@ -213,12 +243,57 @@ class Interpreter:
             raise Exception(f"Runtime error: Cannot use value of type {type_mapping[type(value).__name__]} as {expected_type} for {context} at line {line}.")
         return value
 
+    def validate_argument_count(self, function_name: str, min_args: int, max_args: int | None, got_args: int, line: int):
+        """統一檢查函式參數數量；型別細節由呼叫端或 builtins.py 各自處理。"""
+        if max_args is None:
+            # variadic 函式只要求固定參數數量下限，例如 printf(fmt, ...)。
+            if got_args < min_args:
+                raise Exception(f"Runtime error: Function '{function_name}' expects at least {min_args} arguments, got {got_args} at line {line}.")
+            return
+        if min_args == max_args:
+            if got_args != min_args:
+                raise Exception(f"Runtime error: Function '{function_name}' expects {min_args} arguments, got {got_args} at line {line}.")
+            return
+        if got_args < min_args or got_args > max_args:
+            raise Exception(f"Runtime error: Function '{function_name}' expects between {min_args} and {max_args} arguments, got {got_args} at line {line}.")
+
+    def validate_return_value(self, function_name: str, expected_type: str, value, line: int):
+        """統一檢查自訂函式與內建函式的回傳值是否符合宣告型別。"""
+        if expected_type == "void":
+            if value is not None:
+                raise Exception(f"Runtime error: Void function '{function_name}' should not return a value at line {line}.")
+            return None
+        if value is None:
+            raise Exception(f"Runtime error: Function '{function_name}' must return {expected_type} at line {line}.")
+        return self.validate_value_for_type(value, expected_type, line, f"return from '{function_name}'")
+
+    def call_builtin_function(self, function_name: str, arg_values: list, line: int):
+        """呼叫內建函式，外層只檢查參數數量與 return type，保留 builtins.py 的型別檢查。"""
+        signature = BUILTIN_SIGNATURES.get(function_name)
+        if signature is None:
+            raise Exception(f"Runtime error: Missing built-in signature for '{function_name}' at line {line}.")
+
+        self.validate_argument_count(function_name, signature["min_args"], signature["max_args"], len(arg_values), line)
+
+        builtin_func = getattr(c_builtins, function_name)
+        if function_name == "rand":
+            return_value = builtin_func(self._rng)
+        elif function_name == "srand":
+            # seed 的型別仍由 builtins.srand() 檢查；成功後才同步記錄目前 seed。
+            return_value = builtin_func(self._rng, *arg_values)
+            self.randseed = arg_values[0]
+        elif function_name in str_funcs:
+            return_value = builtin_func(self.memory, *arg_values)
+        else:
+            return_value = builtin_func(*arg_values)
+
+        return self.validate_return_value(function_name, signature["return_type"], return_value, line)
+
     def call_user_function(self, function_name: str, arg_values: list, line: int):
         """呼叫使用者定義函式：建立參數 scope、執行 body，並處理 return 值。"""
         # 從函式表取得先前由 FunctionDef 註冊的簽名與 body。
         func = self.symtable.lookup_function(function_name)
-        if len(arg_values) != len(func.params):
-            raise Exception(f"Runtime error: Function '{function_name}' expects {len(func.params)} arguments, got {len(arg_values)} at line {line}.")
+        self.validate_argument_count(function_name, len(func.params), len(func.params), len(arg_values), line)
 
         # 記住呼叫前 stack_top，函式返回時會釋放本次呼叫配置的所有參數與區域變數。
         frame_entry_top = self.memory.stack_top
@@ -237,14 +312,8 @@ class Interpreter:
                 # 執行函式 body；return 會以 ReturnSignal 方式跳出巢狀 block / if / loop。
                 self.evaluate(func.body)
             except ReturnSignal as signal:
-                if func.return_type == "void":
-                    if signal.value is not None:
-                        raise Exception(f"Runtime error: Void function '{function_name}' should not return a value at line {signal.line}.")
-                    return None
-                if signal.value is None:
-                    raise Exception(f"Runtime error: Function '{function_name}' must return {func.return_type} at line {signal.line}.")
-                # 非 void 函式要檢查 return value 是否符合宣告回傳型別。
-                return self.validate_value_for_type(signal.value, func.return_type, signal.line, f"return from '{function_name}'")
+                # 非 void 函式要檢查 return value 是否符合宣告回傳型別；void 函式則不可回傳值。
+                return self.validate_return_value(function_name, func.return_type, signal.value, signal.line)
 
             if func.return_type != "void":
                 raise Exception(f"Runtime error: Function '{function_name}' ended without returning {func.return_type} at line {line}.")
@@ -267,7 +336,12 @@ class Interpreter:
             return array(self.memory.set_string(ast_node.value), len(ast_node.value)+1, 'char') #放進記憶體並回傳地址 （包含結尾的 \0 字元）
         elif isinstance(ast_node, parser.UnaryExpr):
             # 一元運算依 operator 決定是否需要先取 operand 的值。
-            if ast_node.operator == "-":
+            if ast_node.operator == "+":
+                val = self.evaluate(ast_node.operand)
+                if not isinstance(val, (int)):
+                    raise Exception(f"Runtime error: Cannot apply unary '+' to {type_mapping[type(val).__name__]} at line {ast_node.line}.")
+                return val
+            elif ast_node.operator == "-":
                 val = self.evaluate(ast_node.operand)
                 if not isinstance(val, (int)):
                     raise Exception(f"Runtime error: Cannot apply unary '-' to {type_mapping[type(val).__name__]} at line {ast_node.line}.")
@@ -512,23 +586,8 @@ class Interpreter:
                 #   "abc" -> char*、char buf[] -> char*、int arr[] -> int*。
                 # 這樣 built-in 與 user-defined function 都共用同一套參數轉換規則。
                 args.append(self.decay_array_value(self.evaluate(arg)))
-            if function_name == "rand":
-                if len(args) != 0:
-                    raise Exception(f"Runtime error: rand expects 0 arguments, got {len(args)} at line {ast_node.line}.")
-                return c_builtins.rand(self._rng)
-            if function_name == "srand":
-                if len(args) != 1:
-                    raise Exception(f"Runtime error: srand expects 1 argument, got {len(args)} at line {ast_node.line}.")
-                if not isinstance(args[0], int):
-                    got_type = type_mapping.get(type(args[0]).__name__, type(args[0]).__name__)
-                    raise Exception(f"Runtime error: srand expects int, got {got_type} at line {ast_node.line}.")
-                self.randseed = args[0]
-                return c_builtins.srand(self._rng, args[0])
             if function_name in builtins_funcs:
-                if function_name in str_funcs:
-                    return_value = getattr(c_builtins,function_name)(self.memory,*args)
-                else:
-                    return_value = getattr(c_builtins,function_name)(*args)
+                return_value = self.call_builtin_function(function_name, args, ast_node.line)
             else:
                 return_value = self.call_user_function(function_name, args, ast_node.line)
             return return_value
@@ -771,8 +830,38 @@ class Interpreter:
                 if ast_node.update is not None:
                     self.evaluate(ast_node.update)
             return None
+        elif isinstance(ast_node, parser.SwitchStmt):
+            switch_value = self.evaluate(ast_node.expr)
+            if not isinstance(switch_value, int):
+                raise Exception(f"Runtime error: switch expression must be int at line {ast_node.line}.")
+
+            # C-like switch：先找到第一個符合的 case；沒有符合時才跳到 default。
+            # 從命中的 clause 開始一路執行後續 clause，直到 break 或 switch 結尾，藉此保留 fall-through 行為。
+            start_index = None
+            default_index = None
+            for index, clause in enumerate(ast_node.clauses):
+                if clause.is_default:
+                    # parser 已保證 default 最多一個；這裡只記錄無 case 命中時的備援入口。
+                    default_index = index
+                elif clause.value == switch_value and start_index is None:
+                    start_index = index
+
+            if start_index is None:
+                start_index = default_index
+            if start_index is None:
+                return None
+
+            try:
+                # 只攔截 break：continue 必須穿透到外層 loop，return 必須穿透到外層函式呼叫。
+                for clause in ast_node.clauses[start_index:]:
+                    for stmt in clause.statements:
+                        self.evaluate(stmt)
+            except BreakSignal:
+                # break 結束最近一層 switch；continue/return 不在這裡攔截，交給外層 loop/function。
+                return None
+            return None
         elif isinstance(ast_node, parser.BreakStmt):
-            # 交給外層最近的迴圈處理。
+            # 交給外層最近的迴圈或 switch 處理。
             raise BreakSignal()
         elif isinstance(ast_node, parser.ContinueStmt):
             # 交給外層最近的迴圈處理。

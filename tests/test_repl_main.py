@@ -2,6 +2,8 @@
 test_repl_main.py - 測試 main.py 工具函式
 涵蓋 parse_line_args 與 check_input_complete。
 """
+import runpy
+
 import pytest
 import main
 
@@ -147,3 +149,89 @@ class TestCheckInputComplete:
 
     def test_empty_string_complete(self):
         assert main.check_input_complete("") is True
+
+
+class TestReplVarsScenario:
+    """REPL-level tests for debugger/status commands."""
+
+    def test_vars_lists_array_scenario_09_state(self, monkeypatch, capsys):
+        inputs = iter([
+            "NEW",
+            "int arr[10];",
+            "int i;",
+            "for (i = 0; i < 10; i = i + 1) {",
+            "arr[i] = (i + 1) * 10;",
+            "}",
+            "for (i = 0; i < 10; i = i + 1) {",
+            'printf("arr[%d] = %d\\n", i, arr[i]);',
+            "}",
+            "VARS",
+            "QUIT",
+        ])
+        monkeypatch.setattr("builtins.input", lambda prompt="": next(inputs))
+
+        runpy.run_path("main.py", run_name="__main__")
+        out = capsys.readouterr().out
+
+        expected_values = [10, 20, 30, 40, 50, 60, 70, 80, 90, 100]
+        for index, value in enumerate(expected_values):
+            assert f"arr[{index}] = {value}" in out
+
+        assert "int arr[10] = {10, 20, 30, 40, 50, 60, 70, 80, 90, 100}" in out
+        assert "int i = 10" in out
+
+
+class TestReplFuncsScenario:
+    """REPL-level tests for FUNCS command output."""
+
+    def test_funcs_lists_hard_coded_builtins(self, monkeypatch, capsys):
+        inputs = iter(["FUNCS", "QUIT"])
+        monkeypatch.setattr("builtins.input", lambda prompt="": next(inputs))
+
+        runpy.run_path("main.py", run_name="__main__")
+        out = capsys.readouterr().out
+
+        expected_lines = [
+            "--- built-in functions ---",
+            "int putchar(int ch) [built-in]",
+            "int getchar() [built-in]",
+            "void printf(char *fmt, ...) [built-in]",
+            "void puts(char *s) [built-in]",
+            "int scanf(char *fmt, ...) [built-in]",
+            "int strlen(char *s) [built-in]",
+            "void strcpy(char *dest, char *src) [built-in]",
+            "int strcmp(char *s1, char *s2) [built-in]",
+            "void strcat(char *dest, char *src) [built-in]",
+            "int abs(int x) [built-in]",
+            "int max(int a, int b) [built-in]",
+            "int min(int a, int b) [built-in]",
+            "int pow(int base, int exp) [built-in]",
+            "int sqrt(int x) [built-in]",
+            "int mod(int a, int b) [built-in]",
+            "int rand() [built-in]",
+            "void srand(int seed) [built-in]",
+            "void memset(char *ptr, int val, int n) [built-in]",
+            "int sizeof_int() [built-in]",
+            "int sizeof_char() [built-in]",
+            "int atoi(char *s) [built-in]",
+            "void itoa(int val, char *str) [built-in]",
+            "void exit(int code) [built-in]",
+        ]
+        for line in expected_lines:
+            assert line in out
+
+    def test_funcs_lists_user_function_with_line_number(self, monkeypatch, capsys):
+        inputs = iter([
+            "int add(int a, int b) {",
+            "return a + b;",
+            "}",
+            "FUNCS",
+            "QUIT",
+        ])
+        monkeypatch.setattr("builtins.input", lambda prompt="": next(inputs))
+
+        runpy.run_path("main.py", run_name="__main__")
+        out = capsys.readouterr().out
+
+        assert "int add(int a, int b) line 1" in out
+        assert "--- built-in functions ---" in out

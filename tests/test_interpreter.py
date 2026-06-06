@@ -416,6 +416,158 @@ class TestInterpreterControlFlow:
         out = _filter_debug(capsys.readouterr().out)
         assert "1 2 4 5 7 8 10 11 13 14" in out
 
+    def test_switch_matching_case_executes(self, fresh_interp):
+        code = (
+            "int n = 2;\n"
+            "int result = 0;\n"
+            "switch (n) {\n"
+            "    case 1: result = 10; break;\n"
+            "    case 2: result = 20; break;\n"
+            "    default: result = 99;\n"
+            "}"
+        )
+        _run_code(fresh_interp, code)
+        assert _get_int(fresh_interp, "result") == 20
+
+    def test_switch_default_executes_when_no_case_matches(self, fresh_interp):
+        code = (
+            "int n = 5;\n"
+            "int result = 0;\n"
+            "switch (n) {\n"
+            "    case 1: result = 10; break;\n"
+            "    default: result = 99;\n"
+            "}"
+        )
+        _run_code(fresh_interp, code)
+        assert _get_int(fresh_interp, "result") == 99
+
+    def test_switch_no_match_without_default_executes_nothing(self, fresh_interp):
+        code = (
+            "int n = 5;\n"
+            "int result = 7;\n"
+            "switch (n) {\n"
+            "    case 1: result = 10; break;\n"
+            "    case 2: result = 20; break;\n"
+            "}"
+        )
+        _run_code(fresh_interp, code)
+        assert _get_int(fresh_interp, "result") == 7
+
+    def test_switch_fallthrough_executes_following_clauses(self, fresh_interp):
+        code = (
+            "int n = 1;\n"
+            "int result = 0;\n"
+            "switch (n) {\n"
+            "    case 1: result += 1;\n"
+            "    case 2: result += 10;\n"
+            "    default: result += 100;\n"
+            "}"
+        )
+        _run_code(fresh_interp, code)
+        assert _get_int(fresh_interp, "result") == 111
+
+    def test_switch_break_prevents_fallthrough(self, fresh_interp):
+        code = (
+            "int n = 1;\n"
+            "int result = 0;\n"
+            "switch (n) {\n"
+            "    case 1: result += 1; break;\n"
+            "    case 2: result += 10;\n"
+            "    default: result += 100;\n"
+            "}"
+        )
+        _run_code(fresh_interp, code)
+        assert _get_int(fresh_interp, "result") == 1
+
+    def test_switch_case_constant_expression_matches(self, fresh_interp):
+        code = (
+            "int n = 3;\n"
+            "int result = 0;\n"
+            "switch (n) {\n"
+            "    case 1 + 2: result = 30; break;\n"
+            "    default: result = 99;\n"
+            "}"
+        )
+        _run_code(fresh_interp, code)
+        assert _get_int(fresh_interp, "result") == 30
+
+    def test_switch_case_char_constant_matches(self, fresh_interp):
+        code = (
+            "char ch = 'A';\n"
+            "int result = 0;\n"
+            "switch (ch) {\n"
+            "    case 'A': result = 1; break;\n"
+            "    default: result = 2;\n"
+            "}"
+        )
+        _run_code(fresh_interp, code)
+        assert _get_int(fresh_interp, "result") == 1
+
+    def test_switch_case_logical_or_constant_short_circuits(self, fresh_interp):
+        code = (
+            "int n = 1;\n"
+            "int result = 0;\n"
+            "switch (n) {\n"
+            "    case 1 || (1 / 0): result = 1; break;\n"
+            "    default: result = 2;\n"
+            "}"
+        )
+        _run_code(fresh_interp, code)
+        assert _get_int(fresh_interp, "result") == 1
+
+    def test_switch_case_logical_and_constant_short_circuits(self, fresh_interp):
+        code = (
+            "int n = 0;\n"
+            "int result = 0;\n"
+            "switch (n) {\n"
+            "    case 0 && (1 / 0): result = 1; break;\n"
+            "    default: result = 2;\n"
+            "}"
+        )
+        _run_code(fresh_interp, code)
+        assert _get_int(fresh_interp, "result") == 1
+
+    def test_switch_allows_empty_statements_before_case(self, fresh_interp):
+        code = (
+            "int n = 1;\n"
+            "int result = 0;\n"
+            "switch (n) {\n"
+            "    ;\n"
+            "    ;\n"
+            "    case 1: result = 7; break;\n"
+            "}"
+        )
+        _run_code(fresh_interp, code)
+        assert _get_int(fresh_interp, "result") == 7
+
+    def test_switch_nested_loop_break_only_exits_loop(self, fresh_interp):
+        code = (
+            "int result = 0;\n"
+            "switch (1) {\n"
+            "    case 1:\n"
+            "        while (1) { result += 1; break; }\n"
+            "        result += 10;\n"
+            "        break;\n"
+            "    default: result = 99;\n"
+            "}"
+        )
+        _run_code(fresh_interp, code)
+        assert _get_int(fresh_interp, "result") == 11
+
+    def test_switch_inside_loop_continue_targets_loop(self, fresh_interp):
+        code = (
+            "int i;\n"
+            "int sum = 0;\n"
+            "for (i = 0; i < 3; i = i + 1) {\n"
+            "    switch (i) {\n"
+            "        case 1: continue;\n"
+            "        default: sum += i;\n"
+            "    }\n"
+            "}"
+        )
+        _run_code(fresh_interp, code)
+        assert _get_int(fresh_interp, "sum") == 2
+
     def test_for_loop_squares(self, fresh_interp, capsys):
         _run_code(fresh_interp, "int i;")
         _run_code(
@@ -533,6 +685,31 @@ class TestInterpreterArrays:
         ptr_val = fresh_interp.memory.get_ptr(sym_p.addr)
         assert ptr_val == sym_arr.addr
 
+    def test_array_scenario_09_indexed_write_read_and_output(self, fresh_interp, capsys):
+        code = (
+            "int arr[10];\n"
+            "int i;\n"
+            "for (i = 0; i < 10; i = i + 1) {\n"
+            "    arr[i] = (i + 1) * 10;\n"
+            "}\n"
+            "for (i = 0; i < 10; i = i + 1) {\n"
+            '    printf("arr[%d] = %d\\n", i, arr[i]);\n'
+            "}"
+        )
+        _run_code(fresh_interp, code)
+
+        out = _filter_debug(capsys.readouterr().out)
+        expected_values = [10, 20, 30, 40, 50, 60, 70, 80, 90, 100]
+
+        for index, value in enumerate(expected_values):
+            assert f"arr[{index}] = {value}" in out
+
+        sym = fresh_interp.symtable.lookup_var("arr")
+        for index, value in enumerate(expected_values):
+            assert fresh_interp.memory.array_read(sym.addr, index, "int") == value
+
+        assert _get_int(fresh_interp, "i") == 10
+
 
 class TestInterpreterPointers:
     """測試指標宣告、取址、解參考、指標算術。"""
@@ -630,3 +807,204 @@ class TestInterpreterErrors:
         with pytest.raises(Exception) as exc:
             _run_code(fresh_interp, "int* p = 5;")
         assert "pointer" in str(exc.value).lower() or "Cannot initialize" in str(exc.value)
+
+    def test_builtin_fixed_argument_count_too_few_raises(self, fresh_interp):
+        with pytest.raises(Exception) as exc:
+            _run_code(fresh_interp, "putchar();")
+        message = str(exc.value)
+        assert "putchar" in message
+        assert "expects 1 arguments" in message
+        assert "got 0" in message
+
+    def test_builtin_fixed_argument_count_too_many_raises(self, fresh_interp):
+        with pytest.raises(Exception) as exc:
+            _run_code(fresh_interp, "getchar(1);")
+        message = str(exc.value)
+        assert "getchar" in message
+        assert "expects 0 arguments" in message
+        assert "got 1" in message
+
+    def test_builtin_variadic_argument_count_too_few_raises(self, fresh_interp):
+        with pytest.raises(Exception) as exc:
+            _run_code(fresh_interp, "printf();")
+        message = str(exc.value)
+        assert "printf" in message
+        assert "expects at least 1 arguments" in message
+        assert "got 0" in message
+
+    def test_builtin_return_type_mismatch_raises(self, fresh_interp):
+        # scanf 目前尚未實作，builtins.py 會回傳 None；外層簽名檢查應抓出 int 回傳型別不符。
+        with pytest.raises(Exception) as exc:
+            _run_code(fresh_interp, 'scanf("%d");')
+        message = str(exc.value)
+        assert "scanf" in message
+        assert "must return int" in message
+
+    def test_user_function_argument_count_raises(self, fresh_interp):
+        _run_code(fresh_interp, "int add(int a, int b) { return a + b; }")
+        with pytest.raises(Exception) as exc:
+            _run_code(fresh_interp, "add(1);")
+        message = str(exc.value)
+        assert "add" in message
+        assert "expects 2 arguments" in message
+        assert "got 1" in message
+
+    def test_void_user_function_returning_value_raises(self, fresh_interp):
+        _run_code(fresh_interp, "void bad() { return 1; }")
+        with pytest.raises(Exception) as exc:
+            _run_code(fresh_interp, "bad();")
+        message = str(exc.value)
+        assert "Void function 'bad'" in message
+        assert "should not return a value" in message
+
+    def test_nonvoid_user_function_empty_return_raises(self, fresh_interp):
+        _run_code(fresh_interp, "int bad() { return; }")
+        with pytest.raises(Exception) as exc:
+            _run_code(fresh_interp, "bad();")
+        message = str(exc.value)
+        assert "bad" in message
+        assert "must return int" in message
+
+    def test_nonvoid_user_function_wrong_return_type_raises(self, fresh_interp):
+        _run_code(fresh_interp, 'int bad() { return "x"; }')
+        with pytest.raises(Exception) as exc:
+            _run_code(fresh_interp, "bad();")
+        message = str(exc.value)
+        assert "return from 'bad'" in message
+        assert "as int" in message
+
+    def test_case_outside_switch_raises(self, fresh_interp):
+        with pytest.raises(Exception) as exc:
+            _run_code(fresh_interp, "case 1: ;")
+        assert "case" in str(exc.value)
+        assert "switch" in str(exc.value)
+
+    def test_default_outside_switch_raises(self, fresh_interp):
+        with pytest.raises(Exception) as exc:
+            _run_code(fresh_interp, "default: ;")
+        assert "default" in str(exc.value)
+        assert "switch" in str(exc.value)
+
+    def test_switch_duplicate_case_raises(self, fresh_interp):
+        code = (
+            "int n = 1;\n"
+            "switch (n) {\n"
+            "    case 1: break;\n"
+            "    case 1: break;\n"
+            "}"
+        )
+        with pytest.raises(Exception) as exc:
+            _run_code(fresh_interp, code)
+        assert "Duplicate case" in str(exc.value)
+
+    def test_switch_duplicate_default_raises(self, fresh_interp):
+        code = (
+            "int n = 1;\n"
+            "switch (n) {\n"
+            "    default: break;\n"
+            "    default: break;\n"
+            "}"
+        )
+        with pytest.raises(Exception) as exc:
+            _run_code(fresh_interp, code)
+        assert "Duplicate default" in str(exc.value)
+
+    def test_switch_case_nonconstant_label_raises(self, fresh_interp):
+        code = (
+            "int n = 1;\n"
+            "int x = 1;\n"
+            "switch (n) {\n"
+            "    case x: break;\n"
+            "}"
+        )
+        with pytest.raises(Exception) as exc:
+            _run_code(fresh_interp, code)
+        assert "integer constant expression" in str(exc.value)
+
+    def test_switch_case_function_call_label_raises(self, fresh_interp):
+        code = (
+            "int value() { return 1; }\n"
+            "int n = 1;\n"
+            "switch (n) {\n"
+            "    case value(): break;\n"
+            "}"
+        )
+        with pytest.raises(Exception) as exc:
+            _run_code(fresh_interp, code)
+        assert "integer constant expression" in str(exc.value)
+
+    def test_switch_case_string_label_raises(self, fresh_interp):
+        code = (
+            "int n = 1;\n"
+            "switch (n) {\n"
+            "    case \"x\": break;\n"
+            "}"
+        )
+        with pytest.raises(Exception) as exc:
+            _run_code(fresh_interp, code)
+        assert "integer constant expression" in str(exc.value)
+
+    def test_switch_case_array_index_label_raises(self, fresh_interp):
+        code = (
+            "int n = 1;\n"
+            "int arr[1] = {1};\n"
+            "switch (n) {\n"
+            "    case arr[0]: break;\n"
+            "}"
+        )
+        with pytest.raises(Exception) as exc:
+            _run_code(fresh_interp, code)
+        assert "integer constant expression" in str(exc.value)
+
+    def test_switch_case_division_by_zero_constant_raises(self, fresh_interp):
+        code = (
+            "int n = 1;\n"
+            "switch (n) {\n"
+            "    case 1 / 0: break;\n"
+            "}"
+        )
+        with pytest.raises(Exception) as exc:
+            _run_code(fresh_interp, code)
+        assert "Division by zero" in str(exc.value)
+
+    def test_switch_case_negative_left_shift_raises_syntax_error(self, fresh_interp):
+        code = (
+            "int n = 1;\n"
+            "switch (n) {\n"
+            "    case 1 << -1: break;\n"
+            "}"
+        )
+        with pytest.raises(Exception) as exc:
+            _run_code(fresh_interp, code)
+        assert "Negative shift count" in str(exc.value)
+
+    def test_switch_case_negative_right_shift_raises_syntax_error(self, fresh_interp):
+        code = (
+            "int n = 1;\n"
+            "switch (n) {\n"
+            "    case 1 >> -1: break;\n"
+            "}"
+        )
+        with pytest.raises(Exception) as exc:
+            _run_code(fresh_interp, code)
+        assert "Negative shift count" in str(exc.value)
+
+    def test_switch_rejects_statement_before_first_case(self, fresh_interp):
+        code = (
+            "int n = 1;\n"
+            "int result = 0;\n"
+            "switch (n) {\n"
+            "    result = 1;\n"
+            "    case 1: result = 7; break;\n"
+            "}"
+        )
+        with pytest.raises(Exception) as exc:
+            _run_code(fresh_interp, code)
+        assert "Expected 'case' or 'default'" in str(exc.value)
+
+    def test_switch_expression_non_int_raises(self, fresh_interp):
+        with pytest.raises(Exception) as exc:
+            _run_code(fresh_interp, 'switch ("x") { default: ; }')
+        message = str(exc.value)
+        assert "switch expression" in message
+        assert "int" in message

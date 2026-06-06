@@ -36,11 +36,22 @@
 - `strcmp(char* s1, char* s2)`：已改成逐字元比較，包含共同前綴結束時的 `\0` 比較，回傳值邏輯與 C `strcmp` 一致。
 - `strlen` / `strcpy` / `puts` / `printf` / `memset`：已接上基本型別檢查與記憶體邊界檢查。
 - `symtable.py` 底層 API：已提供 scope stack、function table、變數/陣列/function define 與 lookup API。
+- user-defined function call：interpreter 已支援函式表查找、call stack、local scope、參數綁定、return value 與遞迴所需的獨立呼叫環境。
+- `return`：parser / interpreter 已支援 `return;` 與 `return expr;`，並檢查 `void` / non-void function 的回傳型別。
+- symbol table 作用域接線：變數宣告已使用 `define_var()` / `define_array()`，函式呼叫已使用 `push_scope()` / `pop_scope()`，`VARS` 只顯示全域變數。
+- 陣列核心：已支援 `int` / `char` 陣列配置、初始化列表、字串初始化、索引讀寫、複合指定與越界檢查。
+- 指標核心：已支援 `&x`、`&arr[i]`、`*p` 讀寫、pointer assignment、pointer arithmetic 與 array-to-pointer decay。
+- C-style integer division / modulo：`/`、`%`、`/=`、`%=` 已改為 C-like toward-zero 語意，並檢查除以零。
+- built-in / user-defined function 驗證：已統一檢查參數數量與 return type；built-in 參數型別仍由各函式實作檢查。
+- `FUNCS`：已可列出使用者函式、行號與 hard-coded built-in function 清單。
+- `HELP`：`main.py` 已把 `HELP <command>` 的參數傳給 `repl.HELP(args)`，可顯示摘要與單一指令說明。
+- `switch / case / default`：已支援 lexer keyword、AST、case 整數常數表達式、duplicate case/default 檢查、fall-through、`break` 跳出 switch，以及 `continue` 穿透到外層 loop。
+- pytest regression tests：已建立 pytest 測試，涵蓋 lexer、interpreter、REPL buffer 與 REPL main 部分流程。
 
 ### 部分完成
 
 - `TRACE ON` / `TRACE OFF`：指令狀態切換已完成，但尚未實作逐 statement trace 輸出。
-- string / pointer bounds check：`read_cstring()`、`write_cstring()`、`check_ptr()` 已存在並被部分 built-ins 使用；`scanf`、`strcat` 與 array decay 的 length 傳遞仍需補齊。
+- string / pointer bounds check：`read_cstring()`、`write_cstring()`、`check_ptr()` 已存在並被部分 built-ins 使用；`scanf` 與 `strcat` 仍需補齊。
 
 ---
 
@@ -83,7 +94,8 @@ func call: ...
 - 可加入基本語意檢查：
   - 是否有 `main()`
   - function 是否重複定義
-  - `break` / `continue` 是否只出現在 loop 內
+  - `break` 是否只出現在 loop 或 switch 內
+  - `continue` 是否只出現在 loop 內
 - `CHECK` 不可執行程式。
 - 無錯誤時輸出：
 
@@ -130,13 +142,12 @@ No errors found.
 
 ---
 
-### TODO 5：修正 `HELP`
+### TODO 5：`HELP <command>` 主程式接線已完成
 
-目前 `main.py` 呼叫 `repl.HELP()`，但 `repl.py` 的 `HELP` 定義與內容尚未完成。
+目前 `repl.py` 的 `HELP()` 已可無參數列出摘要，也可接收 command 顯示單一指令說明；`main.py` 已把使用者輸入的 `HELP <command>` 參數傳入。
 
-#### 需要完成
+#### 已完成
 
-- 將 `HELP` 改成可無參數呼叫。
 - 無參數時列出所有指令。
 - 至少包含：
 
@@ -165,18 +176,20 @@ EXIT
 
 ## 2. P1：語言核心尚未完成的部分
 
-### TODO 6：實作函式定義、函式表、`main()` 與 user-defined function call
+### TODO 6：完成 `RUN` 的 `main()` 執行流程
 
-目前 parser 已有 `FunctionDef`、parameter list 與 function body parsing，`symtable.py` 也已有 function table API；但 interpreter 對非 built-in function call 尚未實作，`RUN` 也尚未走完整的 `main()` 執行流程。
+parser 已有 `FunctionDef`、parameter list 與 function body parsing，`symtable.py` 也已有 function table API；interpreter 目前已支援 user-defined function call、local scope、argument binding、return value 與遞迴所需的獨立呼叫環境。剩下尚未完成的是 `RUN` 從整個 buffer 註冊函式、尋找 `main()` 並執行的流程。
 
-#### 需要完成
+#### 已完成
 
-- Interpreter 新增：
+- Interpreter 已新增：
   - `call_user_function()`
-  - call stack
+  - call stack / stack frame 回收
   - local scope
   - argument binding
   - return value handling
+
+#### 需要完成
 
 - `RUN` 流程應為：
   1. 收集所有 function definitions
@@ -186,13 +199,13 @@ EXIT
 
 ---
 
-### TODO 7：實作 `return`
+### TODO 7：`return` 核心已完成，接上 `RUN` 的 main return value 顯示
 
-目前 lexer 有 `return` keyword，但 parser 與 interpreter 尚未完整支援。
+parser 與 interpreter 已支援 `return;` / `return expr;`，並使用 `ReturnSignal(value)` 跳出 function body。`void` function 不可回傳值，`int` / `char` function 必須回傳符合宣告型別的值。
 
-#### 需要完成
+#### 已完成
 
-- 新增 AST：
+- AST：
 
 ```python
 ReturnStmt(expr | None)
@@ -201,6 +214,9 @@ ReturnStmt(expr | None)
 - Interpreter 使用 `ReturnSignal(value)` 跳出 function body。
 - `void` function 不應回傳值。
 - `int` / `char` function 應回傳值。
+
+#### 需要完成
+
 - `main()` 的 return value 用於：
 
 ```text
@@ -209,11 +225,11 @@ Program exited with return value X.
 
 ---
 
-### TODO 8：接上 symbol table 作用域
+### TODO 8：symbol table 作用域已接上
 
-目前 `symtable.py` 已有 scope stack、`VarSymbol` / `FunctionSymbol`、變數與函式的 define / lookup API；剩下的重點是把這些 API 正式接到 interpreter 與 REPL 顯示邏輯。
+`symtable.py` 已有 scope stack、`VarSymbol` / `FunctionSymbol`、變數與函式的 define / lookup API，且目前已接到 interpreter 與 REPL 顯示邏輯。
 
-#### 需要完成
+#### 已完成
 
 - interpreter 的變數宣告改用 `define_var()` / `define_array()`。
 - function call 時使用 `push_scope()`。
@@ -229,11 +245,11 @@ Program exited with return value X.
 
 ---
 
-### TODO 9：完整實作陣列
+### TODO 9：陣列核心已完成
 
-目前 parser 已有 `IndexExpr`、`InitList`、array declaration parsing，但 interpreter 尚未完整支援陣列配置、讀寫與越界檢查。
+parser 已有 `IndexExpr`、`InitList`、array declaration parsing，interpreter 已支援陣列配置、讀寫與越界檢查。
 
-#### 需要完成
+#### 已完成
 
 - 支援：
 
@@ -254,11 +270,11 @@ char s[] = "abc";
 
 ---
 
-### TODO 10：完整實作指標、取址與解參考
+### TODO 10：指標、取址與解參考核心已完成
 
-目前 unary `&` 尚未完成，`*p` 解參考也尚未完整支援。
+目前 unary `&`、`*p` 解參考、指標指定與基礎指標算術已完成。
 
-#### 需要完成
+#### 已完成
 
 - 支援：
 
@@ -283,9 +299,9 @@ swap(&arr[i], &arr[min_idx]);
 
 ---
 
-### TODO 11：修正 C-style integer division
+### TODO 11：C-style integer division 已完成
 
-目前 Python 的 `//` 對負數是向下取整，但 C 語言整數除法是 toward zero。
+Python 的 `//` 對負數是向下取整，但 C 語言整數除法是 toward zero；目前 `/`、`%`、`/=`、`%=` 已改用 C-like `c_div()` / `c_mod()`。
 
 #### 問題範例
 
@@ -305,17 +321,15 @@ Python `//` 會得到：
 -4
 ```
 
-#### 建議修正
+#### 已完成
 
 ```python
-def c_div(a, b):
-    if b == 0:
-        raise Exception("Runtime error: Division by zero")
-    q = abs(a) // abs(b)
-    return q if (a >= 0) == (b >= 0) else -q
+def c_div(left, right):
+    quotient = abs(left) // abs(right)
+    return -quotient if (left < 0) != (right < 0) else quotient
 ```
 
-`%` 與 `%=` 若要接近 C 語意，也應同步修正。
+`%` 與 `%=` 已同步使用 `c_mod()`，並檢查除以零。
 
 ---
 
@@ -365,8 +379,9 @@ sizeof(char)
 
 所有 built-in function 需要檢查：
 
-- 參數數量
-- 參數型別
+- 參數數量：已由 `interpreter.py` 的 built-in signature 外層統一檢查。
+- return type：已由 `interpreter.py` 外層統一檢查。
+- 參數型別：主要由 `builtins.py` 各函式實作自行檢查。
 - pointer 是否有效
 - array bounds
 - 錯誤時不可顯示 Python traceback
@@ -569,9 +584,9 @@ int arr[SIZE];
 
 ## 6. P5：測試與驗收準備
 
-### TODO 20：建立 regression tests
+### TODO 20：擴充 regression tests 與 `.sc/.expected` 驗收測試
 
-建議建立以下測試檔：
+目前已建立 pytest regression tests，涵蓋 lexer、interpreter、REPL buffer 與 REPL main 部分流程。仍建議補上正式 `.sc/.expected` 測試檔與測試 runner：
 
 ```text
 tests/test_repl_commands.sc
@@ -606,23 +621,33 @@ tests/test_define_repl.sc
 - 語法錯誤
 - 執行期錯誤
 
+#### 已完成
+
+- pytest 單元測試已涵蓋：
+  - lexer keyword / 錯誤處理
+  - interpreter 變數、運算式、控制流程、switch/case、陣列、指標、函式、built-ins 與錯誤路徑
+  - REPL buffer 操作
+  - REPL main 部分命令輸出
+
+#### 需要完成
+
+- 建立 `.sc/.expected` 驗收測試檔。
+- 建立測試 runner，比對程式輸出與 expected。
+- 補 `scanf`、`RUN`、`CHECK`、`LOAD` 的整合測試。
+
 ---
 
 ## 7. 建議實作順序
 
 ```text
-1. 修 main.py 指令分派：HELP / DELETE / INSERT / LOAD / CHECK / RUN / TRACE
+1. 修 main.py 指令分派：LOAD / CHECK / RUN / TRACE
 2. 移除 debug output，修 ABOUT / LIST / APPEND 輸出格式
-3. Parser / Interpreter 加 ReturnStmt 與 main() 執行流程
-4. Interpreter 加 function table / return signal / user-defined call / recursion
-5. 接上 symtable scope API；VARS 只顯示 global
-6. 完整實作 array：宣告、初始化、IndexExpr、越界
-7. 完整實作 pointer：&、*、pointer assignment、array decay
-8. 補 builtins：strcat、scanf、exit，並補齊尚未完成的 bounds check
-9. 支援 REPL 跨輸入保存 #define
-10. 修 C integer division / modulo
-11. 寫公開測試 A regression test
-12. 補 test_scanf.sc 與 test_define_repl.sc
+3. 完成 RUN 的 main() 執行流程與 return value 輸出
+4. 補 builtins：strcat、scanf、exit，並補齊尚未完成的 bounds check
+5. 完成 TRACE 逐 statement 輸出
+6. 寫公開測試 A regression test
+7. 補 `.sc/.expected` 測試集與 runner
+8. 補 test_scanf.sc 與 test_define_repl.sc
 ```
 
 ---
@@ -694,6 +719,7 @@ int arr[SIZE];
 - `TRACE ON/OFF` 有效果。
 - `VARS` 只顯示全域變數。
 - `FUNCS` 能顯示使用者函式與 built-in functions。
+- `switch / case / default` 可正常執行，且 `case` 只接受整數常數表達式。
 - `scanf` 可正常讀入 `%d` / `%c` / `%s`。
 - `sizeof_int()` / `sizeof_char()` 可正常回傳。
 - `#define` 可在 REPL 中跨輸入保存。

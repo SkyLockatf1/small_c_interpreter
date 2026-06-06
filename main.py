@@ -162,7 +162,7 @@ if __name__ == "__main__":
             elif cmd == "ABOUT":
                 repl.ABOUT()
             elif cmd == "HELP":
-                repl.HELP()
+                repl.HELP(args)
             elif cmd == "LIST":
                 handle_list(buffer, args)
             elif cmd == "DELETE":
@@ -206,19 +206,40 @@ if __name__ == "__main__":
                 pass
             elif cmd == "FUNCS":
                 functions = list(interpreter_instance.symtable.iter_functions())
-                if not functions:
-                    print("No functions defined.")
-                else:
-                    for function in functions:
-                        params = []
-                        for param in function.params:
-                            # 函式表保留原始陣列參數宣告，因此 FUNCS 顯示 int a[]，
-                            # 實際呼叫時才在 interpreter 內退化成 int* / char*。
-                            if param.is_array:
-                                params.append(f"{param.var_type} {param.name}[]")
-                            else:
-                                params.append(f"{param.var_type} {param.name}")
-                        print(f"{function.return_type} {function.name}({', '.join(params)})")
+                for function in functions:
+                    params = []
+                    for param in function.params:
+                        # 函式表保留原始陣列參數宣告，因此 FUNCS 顯示 int a[]，
+                        # 實際呼叫時才在 interpreter 內退化成 int* / char*。
+                        if param.is_array:
+                            params.append(f"{param.var_type} {param.name}[]")
+                        else:
+                            params.append(f"{param.var_type} {param.name}")
+                    print(f"{function.return_type} {function.name}({', '.join(params)}) line {function.line}")
+                print("--- built-in functions ---")
+                print("int putchar(int ch) [built-in]")
+                print("int getchar() [built-in]")
+                print("void printf(char *fmt, ...) [built-in]")
+                print("void puts(char *s) [built-in]")
+                print("int scanf(char *fmt, ...) [built-in]")
+                print("int strlen(char *s) [built-in]")
+                print("void strcpy(char *dest, char *src) [built-in]")
+                print("int strcmp(char *s1, char *s2) [built-in]")
+                print("void strcat(char *dest, char *src) [built-in]")
+                print("int abs(int x) [built-in]")
+                print("int max(int a, int b) [built-in]")
+                print("int min(int a, int b) [built-in]")
+                print("int pow(int base, int exp) [built-in]")
+                print("int sqrt(int x) [built-in]")
+                print("int mod(int a, int b) [built-in]")
+                print("int rand() [built-in]")
+                print("void srand(int seed) [built-in]")
+                print("void memset(char *ptr, int val, int n) [built-in]")
+                print("int sizeof_int() [built-in]")
+                print("int sizeof_char() [built-in]")
+                print("int atoi(char *s) [built-in]")
+                print("void itoa(int val, char *str) [built-in]")
+                print("void exit(int code) [built-in]")
             elif cmd == "VARS":
                 # VARS 只顯示目前全域變數；函式呼叫期間的區域變數不列入驗收輸出。
                 variables = list(interpreter_instance.symtable.iter_vars())

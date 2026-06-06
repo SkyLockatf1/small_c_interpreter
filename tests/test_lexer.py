@@ -6,6 +6,17 @@ import pytest
 import lexer as lexer_mod
 
 
+class TestLexerKeywords:
+    """測試新增控制流程關鍵字是否會被辨識為 keyword。"""
+
+    def test_switch_case_default_are_keywords(self):
+        tokens = lexer_mod.lexer("switch (x) { case 1: default: ; }\n", {}).tokenize()
+        keyword_values = [token.value for token in tokens if token.type == lexer_mod.token_type.keyword]
+        assert "switch" in keyword_values
+        assert "case" in keyword_values
+        assert "default" in keyword_values
+
+
 class TestLexerErrors:
     """測試 Lexer 在非法輸入時拋出含描述訊息的例外。"""
 
