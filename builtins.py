@@ -1,6 +1,6 @@
 import math
 from memory import VirtualMemory
-from extra_c_type import char_ptr
+from extra_c_type import char_ptr, int_ptr
 
 type_mapping = {
     'str': 'char',
@@ -99,9 +99,112 @@ def printf(vm: VirtualMemory, fmt: char_ptr, *args) -> None:
         raise Exception("Runtime error: printf argument count mismatch")
     print(result, end='')
 
-# void scanf(char* fmt, ...);
-def scanf(vm: VirtualMemory, fmt: char_ptr, *args) -> None:
-    pass  # scanf 的實作較複雜，暫時留空。
+# int scanf(char* fmt, ...);
+def scanf(vm: VirtualMemory, fmt: char_ptr, *args) -> int:
+    # scanf 的格式字串本身也存放在虛擬記憶體中，因此第一個參數必須是 char*。
+    if type(fmt) is not char_ptr:
+        got_type = type_mapping.get(type(fmt).__name__, type(fmt).__name__)
+        raise Exception(f"Runtime error: scanf expects char* for format string, got {got_type}")
+
+    format_str = vm.read_cstring(fmt.addr)
+    specifiers = []
+    i = 0
+    # 第一輪只掃描格式字串，找出需要接收輸入的格式碼。
+    # 本專案只支援 %d 與 %c；%C、%%、%s 等其他格式都視為程式錯誤。
+    while i < len(format_str):
+        if format_str[i] == '%':
+            if i + 1 >= len(format_str):
+                raise Exception("Runtime error: scanf format string ends with '%'")
+            specifier = format_str[i + 1]
+            if specifier not in ('d', 'c'):
+                raise Exception(f"Runtime error: scanf unsupported format specifier %{specifier}")
+            specifiers.append(specifier)
+            i += 2
+        else:
+            i += 1
+
+    if len(args) != len(specifiers):
+        raise Exception("Runtime error: scanf argument count mismatch")
+
+    # 先檢查所有指標型別與可寫入範圍；程式本身寫錯時不應消耗使用者輸入。
+    # 型別錯誤不是「讀取失敗」，而是 runtime error，所以不會回傳成功讀取數量。
+    for index, specifier in enumerate(specifiers):
+        arg = args[index]
+        if specifier == 'd':
+            if type(arg) is not int_ptr:
+                got_type = type_mapping.get(type(arg).__name__, type(arg).__name__)
+                raise Exception(f"Runtime error: scanf expects int* for %d, got {got_type}")
+            vm.check_ptr(arg.addr, 4)
+        elif specifier == 'c':
+            if type(arg) is not char_ptr:
+                got_type = type_mapping.get(type(arg).__name__, type(arg).__name__)
+                raise Exception(f"Runtime error: scanf expects char* for %c, got {got_type}")
+            vm.check_ptr(arg.addr, 1)
+
+    try:
+        # 目前直譯器的輸入模型以一行為單位，與 getchar() 一樣使用 Python input()。
+        input_text = input()
+    except EOFError:
+        return 0
+
+    success_count = 0
+    arg_index = 0
+    input_index = 0
+    i = 0
+    while i < len(format_str):
+        if format_str[i].isspace():
+            # scanf 格式字串中的任意空白會吃掉輸入中的任意連續空白。
+            while i < len(format_str) and format_str[i].isspace():
+                i += 1
+            while input_index < len(input_text) and input_text[input_index].isspace():
+                input_index += 1
+            continue
+
+        if format_str[i] != '%':
+            # 一般字元必須逐字匹配；不匹配屬於輸入格式不符，回傳已成功讀取的項目數。
+            if input_index >= len(input_text) or input_text[input_index] != format_str[i]:
+                return success_count
+            input_index += 1
+            i += 1
+            continue
+
+        specifier = format_str[i + 1]
+        arg = args[arg_index]
+        if specifier == 'd':
+            # %d 讀取整數前會略過輸入空白，並接受可選的 + 或 - 號。
+            while input_index < len(input_text) and input_text[input_index].isspace():
+                input_index += 1
+
+            number_start = input_index
+            if input_index < len(input_text) and input_text[input_index] in '+-':
+                input_index += 1
+
+            digit_start = input_index
+            while input_index < len(input_text) and input_text[input_index].isdigit():
+                input_index += 1
+
+            if digit_start == input_index:
+                # 沒有讀到任何數字：輸入不匹配，不寫入目的變數。
+                return success_count
+
+            # 只有完整讀到一個整數後才寫入 int* 目標，避免失敗時污染原變數。
+            vm.set_int(arg.addr, int(input_text[number_start:input_index]))
+            success_count += 1
+        elif specifier == 'c':
+            # %c 直接讀下一個字元，不會自動略過空白；若要略過空白需在格式字串寫成 " %c"。
+            if input_index >= len(input_text):
+                return success_count
+            ch = input_text[input_index]
+            if ord(ch) > 127:
+                raise Exception(f"Runtime error: scanf %c expects ASCII input, got {ord(ch)}")
+            vm.set_char(arg.addr, ord(ch))
+            input_index += 1
+            success_count += 1
+
+        arg_index += 1
+        i += 2
+
+    return success_count
 
 # int putchar(int ch);
 def putchar(ch: int) -> int:
@@ -274,6 +377,29 @@ def strcpy(vm: VirtualMemory, dest: char_ptr, src: char_ptr) -> None:
     s = vm.read_cstring(src.addr)
     # 寫入範圍由 VirtualMemory.check_ptr() 依 allocation 邊界驗證。
     vm.write_cstring(dest.addr, s, len(s) + 1)
+
+# void strcat(char* dest, char* src);
+def strcat(vm: VirtualMemory, dest: char_ptr, src: char_ptr) -> None:
+    if type(dest) is not char_ptr:
+        got_type = type_mapping.get(type(dest).__name__, type(dest).__name__)
+        raise Exception(f"Runtime error: strcat expects char* for dest, got {got_type}")
+    if type(src) is not char_ptr:
+        got_type = type_mapping.get(type(src).__name__, type(src).__name__)
+        raise Exception(f"Runtime error: strcat expects char* for src, got {got_type}")
+
+    dest_text = vm.read_cstring(dest.addr)
+    src_text = vm.read_cstring(src.addr)
+    result = dest_text + src_text
+
+    # dest 可能是 buf + n 這類中間指標，因此容量要從 dest.addr 算到 allocation 結尾。
+    allocation = vm.find_allocation(dest.addr)
+    if allocation is None:
+        raise Exception(f"Runtime error: invalid memory access at {dest.addr:#x}")
+    base, size = allocation
+    remaining_size = base + size - dest.addr
+
+    # write_cstring 會寫入 result 與結尾 \0，並在容量不足時回報 buffer overflow。
+    vm.write_cstring(dest.addr, result, remaining_size)
 
 # int strcmp(char* s1, char* s2);
 def strcmp(vm: VirtualMemory, s1: char_ptr, s2: char_ptr) -> int:

@@ -13,7 +13,7 @@
 - `CHECK` / `RUN` / `TRACE` / `VARS` / `FUNCS`
 - 陣列、指標、函式、遞迴
 - 公開驗收測試 A 的完整流程
-- `scanf`
+- `scanf`（目前支援 `%d` / `%c`）
 - `sizeof_int()` / `sizeof_char()`
 - REPL 中跨輸入保存 `#define`
 - `VARS` 只顯示全域變數
@@ -47,34 +47,40 @@
 - `HELP`：`main.py` 已把 `HELP <command>` 的參數傳給 `repl.HELP(args)`，可顯示摘要與單一指令說明。
 - `switch / case / default`：已支援 lexer keyword、AST、case 整數常數表達式、duplicate case/default 檢查、fall-through、`break` 跳出 switch，以及 `continue` 穿透到外層 loop。
 - pytest regression tests：已建立 pytest 測試，涵蓋 lexer、interpreter、REPL buffer 與 REPL main 部分流程。
+- `LOAD filename`：已可從檔案載入程式緩衝區，並在 dirty buffer 時提示確認；已處理檔案不存在、權限、UTF-8 解碼與一般讀檔錯誤。
+- `RUN`：已可合併 buffer、建立乾淨 runtime、載入全域宣告與函式、從 `main()` 執行，並輸出 main return value。
+- `scanf`：已支援 `%d` / `%c`，會檢查 `int*` / `char*`，輸入不匹配時回傳成功讀取數量。
+- `strcat(char* dest, char* src)`：已實作字串串接，並透過 allocation 邊界檢查避免 buffer overflow。
+- 互動模式行號：lexer 已支援 `line_start`，使互動輸入的錯誤行號可對齊 buffer / `LIST` 行號。
 
 ### 部分完成
 
+- `CHECK`：已接上 lexer/parser，能檢查詞法與語法錯誤且不執行程式；完整語意檢查仍待補。
 - `TRACE ON` / `TRACE OFF`：指令狀態切換已完成，但尚未實作逐 statement trace 輸出。
-- string / pointer bounds check：`read_cstring()`、`write_cstring()`、`check_ptr()` 已存在並被部分 built-ins 使用；`scanf` 與 `strcat` 仍需補齊。
+- string / pointer bounds check：`read_cstring()`、`write_cstring()`、`check_ptr()` 已存在並被多數 built-ins 使用；`scanf(%d/%c)` 與 `strcat` 已接上 pointer / allocation 檢查。若未來新增會寫入字串的功能，仍需確認 buffer 邊界。
 
 ---
 
 ## 1. P0：會直接卡住驗收的功能
 
-### TODO 1：完成 `RUN`
+### TODO 1：`RUN` 已完成主要流程
 
-目前 `main.py` 中 `RUN` 尚未實作。
+目前 `RUN` 已可從 buffer 執行完整程式的 `main()`。
 
-#### 需要完成
+#### 已完成
 
 - 將整個 `buffer` 合併成完整程式碼字串。
 - 每次 `RUN` 都建立乾淨的 `Interpreter()`。
-- `RUN` 不應沿用前一次執行後的記憶體與符號表。
-- `RUN` 應先 parse 整個 buffer。
-- `RUN` 應尋找並執行 `main()`。
+- `RUN` 不沿用前一次執行後的動態記憶體與區域狀態。
+- `RUN` 會先 parse 整個 buffer。
+- `RUN` 會尋找並執行 `main()`。
 - 執行結束後輸出：
 
 ```text
 Program exited with return value 0.
 ```
 
-- 不應輸出 debug 訊息，例如：
+- 預設不輸出 debug 訊息，例如：
 
 ```text
 AST: ...
@@ -83,41 +89,47 @@ func call: ...
 
 ---
 
-### TODO 2：完成 `CHECK`
+### TODO 2：補完整 `CHECK` 語意檢查
 
-目前 `CHECK` 尚未完整接上。
+目前 `CHECK` 已接上基礎 lexer/parser 檢查，但尚未完成完整 semantic check。
 
-#### 需要完成
+#### 已完成
 
 - 對整個 buffer 做 lexing。
 - 對整個 buffer 做 parsing。
-- 可加入基本語意檢查：
-  - 是否有 `main()`
-  - function 是否重複定義
-  - `break` 是否只出現在 loop 或 switch 內
-  - `continue` 是否只出現在 loop 內
-- `CHECK` 不可執行程式。
-- 無錯誤時輸出：
+- `CHECK` 不會執行程式。
+- 無 lexer/parser 錯誤時輸出：
 
 ```text
 No errors found.
 ```
 
+#### 需要完成
+
+- 檢查是否有 `main()`。
+- 檢查 function / global variable 是否重複定義。
+- 檢查未定義變數與未定義函式。
+- 檢查函式呼叫參數數量。
+- 檢查 return 型別是否符合函式宣告。
+- 檢查 `break` 是否只出現在 loop 或 switch 內。
+- 檢查 `continue` 是否只出現在 loop 內。
+
 ---
 
-### TODO 3：完成 `LOAD`
+### TODO 3：`LOAD` 已完成
 
-目前 `LOAD` 尚未實作。
+目前 `LOAD` 已可從檔案載入 Small-C 原始碼到程式緩衝區。
 
-#### 需要完成
+#### 已完成
 
 - 讀取指定檔案。
 - 將檔案內容按行放入 `buffer`。
 - 顯示成功載入的行數。
+- 若目前 buffer 有未儲存修改，覆蓋前會提示確認。
 - 處理錯誤：
   - 檔案不存在
   - 權限不足
-  - 路徑是資料夾
+  - UTF-8 解碼錯誤
   - 檔案讀取失敗
 
 ---
@@ -176,9 +188,9 @@ EXIT
 
 ## 2. P1：語言核心尚未完成的部分
 
-### TODO 6：完成 `RUN` 的 `main()` 執行流程
+### TODO 6：`RUN` 的 `main()` 執行流程已完成
 
-parser 已有 `FunctionDef`、parameter list 與 function body parsing，`symtable.py` 也已有 function table API；interpreter 目前已支援 user-defined function call、local scope、argument binding、return value 與遞迴所需的獨立呼叫環境。剩下尚未完成的是 `RUN` 從整個 buffer 註冊函式、尋找 `main()` 並執行的流程。
+parser 已有 `FunctionDef`、parameter list 與 function body parsing，`symtable.py` 也已有 function table API；interpreter 目前已支援 user-defined function call、local scope、argument binding、return value 與遞迴所需的獨立呼叫環境。`RUN` 也已接上從整個 buffer 註冊函式、尋找 `main()` 並執行的流程。
 
 #### 已完成
 
@@ -189,7 +201,7 @@ parser 已有 `FunctionDef`、parameter list 與 function body parsing，`symtab
   - argument binding
   - return value handling
 
-#### 需要完成
+#### 已完成
 
 - `RUN` 流程應為：
   1. 收集所有 function definitions
@@ -199,7 +211,7 @@ parser 已有 `FunctionDef`、parameter list 與 function body parsing，`symtab
 
 ---
 
-### TODO 7：`return` 核心已完成，接上 `RUN` 的 main return value 顯示
+### TODO 7：`return` 核心與 `RUN` return value 顯示已完成
 
 parser 與 interpreter 已支援 `return;` / `return expr;`，並使用 `ReturnSignal(value)` 跳出 function body。`void` function 不可回傳值，`int` / `char` function 必須回傳符合宣告型別的值。
 
@@ -214,10 +226,7 @@ ReturnStmt(expr | None)
 - Interpreter 使用 `ReturnSignal(value)` 跳出 function body。
 - `void` function 不應回傳值。
 - `int` / `char` function 應回傳值。
-
-#### 需要完成
-
-- `main()` 的 return value 用於：
+- `main()` 的 return value 已用於：
 
 ```text
 Program exited with return value X.
@@ -337,22 +346,22 @@ def c_div(left, right):
 
 ### TODO 12：修正與補齊 built-in functions
 
-目前已有部分 built-in functions，但仍有缺漏。
+目前多數必要 built-in functions 已完成；仍有少數缺漏或限制。
 
 #### 已完成
 
 - `atoi(char* str)`：已接收 `char_ptr`，並加入需要 memory 的呼叫路徑。
 - `itoa(int value, char* dest)`：已支援十進位轉換，並加入需要 memory 的呼叫路徑。
 - `strcmp(char* s1, char* s2)`：已符合 C `strcmp` 的逐字元比較邏輯。
+- `strcat(char* dest, char* src)`：已完成串接與 buffer overflow 檢查。
+- `scanf(char* fmt, ...)`：已支援 `%d` / `%c`，並檢查 pointer 型別。
 - `sizeof_int()` / `sizeof_char()`：已完成。
 
 #### 必須完成
 
-- 新增：
+- 尚未實作：
 
 ```c
-scanf(...);
-strcat(char* dest, char* src);
 exit(int code);
 ```
 
@@ -388,21 +397,18 @@ sizeof(char)
 
 ---
 
-### TODO 13：實作 `scanf`
+### TODO 13：`scanf` 已支援 `%d` / `%c`
 
-已確認需要支援 `scanf`。
+已確認需要支援 `scanf`，目前已完成 `%d` / `%c` 的必要範圍。
 
-#### 建議支援範圍
+#### 已完成支援範圍
 
-先支援驗收最可能出現的格式：
+目前支援：
 
 ```c
 scanf("%d", &x);
 scanf("%c", &ch);
-scanf("%s", buf);
 ```
-
-#### 需要完成
 
 - 解析 format string。
 - 支援 `%d`：
@@ -411,36 +417,32 @@ scanf("%s", buf);
 - 支援 `%c`：
   - 讀入單一字元
   - 寫入 `char*`
-- 支援 `%s`：
-  - 讀入字串
-  - 寫入 char array / `char*`
-  - 注意結尾 `\0`
-  - 檢查 buffer 是否足夠
 - 回傳成功讀入的項目數。
 - 參數不是 pointer 時要報 runtime error。
+
+#### 不支援 / 不列入目前範圍
+
+- `%s`
+- `%C`
+- `%%`
+- 跨次 `scanf` 保留未消耗輸入；目前一次 `scanf` 讀取一行。
 
 ---
 
 ### TODO 14：修正 string / pointer bounds check 設計
 
-目前 `char_ptr` / `int_ptr` 已保存 `addr`、`base_addr`、`length`，`memory.py` 也已有 `find_allocation()` / `check_ptr()` 可從任意 target address 找到所屬 allocation。
+目前 `char_ptr` / `int_ptr` 保存目前指標位址 `addr`，實際邊界資訊由 `memory.py` 的 allocation table 管理；`find_allocation()` / `check_ptr()` 可從任意 target address 找到所屬 allocation 並檢查可存取範圍。
 
 #### 已完成
 
 - `read_cstring()`：讀取 C 字串時會限制在 allocation 邊界內，避免讀到相鄰配置區。
 - `write_cstring()`：寫入字串時會檢查 `max_len` 與實際 allocation 邊界。
-- `strlen`、`strcpy`、`strcmp`、`puts`、`printf`、`memset`、`itoa` 已使用上述檢查機制。
+- `strlen`、`strcpy`、`strcmp`、`strcat`、`puts`、`printf`、`memset`、`itoa` 已使用上述檢查機制。
+- `scanf(%d/%c)` 已檢查 `int*` / `char*` 型別與可寫入範圍。
 
 #### 需要完成
 
-- 統一尚未完成函式的 bounds check：
-
-```c
-strcat
-scanf
-```
-
-- 修正 interpreter array decay 建立 pointer 時的 length 傳遞，避免 `char_ptr.length` 保持為 `0` 而失去已知 buffer 大小。
+- 若未來新增會寫入字串的 input 函式，例如 `scanf("%s", buf)`，需同步補 buffer 邊界檢查。
 
 ---
 
@@ -502,11 +504,11 @@ func call: ...
 
 ---
 
-### TODO 17：修正 `ABOUT` 內容
+### TODO 17：同步 `ABOUT` / README 專案資訊
 
-目前 `ABOUT` 有 ASCII art，但作者、版本、學期仍需要補完整。
+目前 `ABOUT` 已有 ASCII art、版本、作者與學期資訊；README 的課程資訊表仍保留 TODO，待交付前確認後填入。
 
-#### 需要包含
+#### README 需要確認
 
 - Interpreter name
 - Version
@@ -640,14 +642,13 @@ tests/test_define_repl.sc
 ## 7. 建議實作順序
 
 ```text
-1. 修 main.py 指令分派：LOAD / CHECK / RUN / TRACE
-2. 移除 debug output，修 ABOUT / LIST / APPEND 輸出格式
-3. 完成 RUN 的 main() 執行流程與 return value 輸出
-4. 補 builtins：strcat、scanf、exit，並補齊尚未完成的 bounds check
-5. 完成 TRACE 逐 statement 輸出
-6. 寫公開測試 A regression test
-7. 補 `.sc/.expected` 測試集與 runner
-8. 補 test_scanf.sc 與 test_define_repl.sc
+1. 補完整 CHECK semantic checker
+2. 完成 TRACE 逐 statement 輸出
+3. 實作 exit(int code)
+4. 修 APPEND / INSERT 提示與縮排保留
+5. 補 `.sc/.expected` 測試集與 runner
+6. 補公開測試 A regression test
+7. 補 test_define_repl.sc 與其他整合驗收測試
 ```
 
 ---
@@ -714,13 +715,13 @@ int arr[SIZE];
 - 任一錯誤輸入不會讓 REPL 崩潰。
 - 不顯示 Python traceback。
 - `NEW` 能清空 buffer、記憶體、符號表、macro definitions 與 trace 狀態。
-- `CHECK` 不執行程式。
+- `CHECK` 不執行程式；完整語意檢查仍待補。
 - `RUN` 能執行整段程式。
 - `TRACE ON/OFF` 有效果。
 - `VARS` 只顯示全域變數。
 - `FUNCS` 能顯示使用者函式與 built-in functions。
 - `switch / case / default` 可正常執行，且 `case` 只接受整數常數表達式。
-- `scanf` 可正常讀入 `%d` / `%c` / `%s`。
+- `scanf` 可正常讀入 `%d` / `%c`。
 - `sizeof_int()` / `sizeof_char()` 可正常回傳。
 - `#define` 可在 REPL 中跨輸入保存。
 - 公開測試 A 的主要流程可通過。

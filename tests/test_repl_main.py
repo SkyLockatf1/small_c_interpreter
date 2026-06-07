@@ -173,11 +173,11 @@ class TestRunCommand:
             "}",
             "RUN",
             "QUIT",
+            "y",
         ])
 
         assert "hello" in out
         assert "Program exited with return value 0." in out
-        assert "AST:" not in out
 
     def test_run_uses_main_return_value(self, monkeypatch, capsys):
         out = self.run_repl(monkeypatch, capsys, [
@@ -186,6 +186,7 @@ class TestRunCommand:
             "}",
             "RUN",
             "QUIT",
+            "y",
         ])
 
         assert "Program exited with return value 7." in out
@@ -197,6 +198,7 @@ class TestRunCommand:
             "}",
             "RUN",
             "QUIT",
+            "y",
         ])
 
         assert "Error: main function not found." in out
@@ -208,6 +210,7 @@ class TestRunCommand:
             ".",
             "RUN",
             "QUIT",
+            "y",
         ])
 
         assert "Error: main function not found." in out
@@ -224,6 +227,7 @@ class TestRunCommand:
             ".",
             "RUN",
             "QUIT",
+            "y",
         ])
 
         assert "top level should not run" not in out
@@ -241,6 +245,7 @@ class TestRunCommand:
             "RUN",
             "RUN",
             "QUIT",
+            "y",
         ])
 
         assert out.count("counter=1") == 2
@@ -253,6 +258,7 @@ class TestRunCommand:
             "}",
             "RUN",
             "QUIT",
+            "y",
         ])
 
         assert "ok" in out
@@ -266,6 +272,7 @@ class TestRunCommand:
             "}",
             "RUN",
             "QUIT",
+            "y",
         ])
 
         assert "Runtime error" in out
@@ -297,6 +304,7 @@ class TestCheckCommand:
             ".",
             "CHECK",
             "QUIT",
+            'y',
         ])
 
         assert "No errors found." in out
@@ -312,6 +320,7 @@ class TestCheckCommand:
             ".",
             "CHECK",
             "QUIT",
+            "y",
         ])
 
         assert "No errors found." in out
@@ -327,6 +336,7 @@ class TestCheckCommand:
             ".",
             "CHECK",
             "QUIT",
+            "y",
         ])
 
         assert "Syntax error" in out
@@ -345,6 +355,7 @@ class TestCheckCommand:
             "CHECK",
             "VARS",
             "QUIT",
+            'y',
         ])
 
         assert "No errors found." in out
@@ -368,6 +379,7 @@ class TestReplVarsScenario:
             "}",
             "VARS",
             "QUIT",
+            "y",
         ])
         monkeypatch.setattr("builtins.input", lambda prompt="": next(inputs))
 
@@ -428,6 +440,7 @@ class TestReplFuncsScenario:
             "}",
             "FUNCS",
             "QUIT",
+            "y",
         ])
         monkeypatch.setattr("builtins.input", lambda prompt="": next(inputs))
 

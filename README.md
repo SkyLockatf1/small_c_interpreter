@@ -84,16 +84,16 @@ sc> EXIT
 | `INSERT` | 已實作 | 可在指定行前插入多行，以單獨一行 `.` 結束。 |
 | `APPEND` | 已實作 | 可在緩衝區尾端追加多行，以單獨一行 `.` 結束。 |
 | `SAVE` | 已實作 | 可將目前緩衝區寫入檔案，並處理常見寫檔錯誤。 |
-| `NEW` | 部分實作 | 目前可清空 buffer 並重建 interpreter，但尚未加入未儲存修改確認。 |
+| `NEW` | 已實作 | 可清空 buffer、重建 interpreter、清除 macro 狀態；若有未儲存修改會先提示確認。 |
 | `TRACE ON/OFF` | 部分實作 | 可切換 trace 狀態，但尚未完整輸出逐 statement trace。 |
-| `VARS` | 部分實作 | 可顯示目前全域變數、陣列與指標資訊。 |
-| `FUNCS` | 部分實作 | 可列出目前 interpreter 內已註冊的使用者函式。 |
+| `VARS` | 已實作 | 可顯示目前全域變數、陣列與指標資訊。 |
+| `FUNCS` | 已實作 | 可列出目前 interpreter 內已註冊的使用者函式與 hard-coded built-ins。 |
 | `ABOUT` | 部分實作 | 已有 ASCII art 顯示，但專案資訊仍待補齊。 |
 | `CLEAR` | 已實作 | 可清除終端畫面。 |
 | `QUIT` / `EXIT` | 已實作 | 可離開 REPL。 |
-| `LOAD` | 尚未完成 | `main.py` 中目前仍為 `pass`。 |
-| `RUN` | 尚未完成 | `main.py` 中目前仍為 `pass`。 |
-| `CHECK` | 尚未完成 | 尚未接上 REPL 指令流程。 |
+| `LOAD` | 已實作 | 可從檔案載入程式緩衝區，dirty buffer 時會先提示確認。 |
+| `RUN` | 已實作 | 會建立乾淨 runtime，載入全域宣告與函式，從 `main()` 執行並輸出 return value。 |
+| `CHECK` | 部分實作 | 已做 lexer/parser 檢查且不執行程式；完整語意檢查仍待補。 |
 | `HELP` | 已實作 | 支援 `HELP` 指令摘要與 `HELP <command>` 單一指令說明。 |
 
 ## Small-C 語言支援狀態
@@ -107,11 +107,11 @@ sc> EXIT
 | 變數宣告 | 部分完成 | 支援 `int`、`char`、指標與陣列相關 AST / 執行邏輯。 |
 | 運算式 | 部分完成 | 支援多數算術、比較、邏輯、位元與指定運算。 |
 | 控制結構 | 部分完成 | Parser 與 interpreter 已有 `if`、`while`、`for`、`do while`、`break`、`continue` 相關結構。 |
-| 函式定義 | 部分完成 | Parser、symbol table 與 interpreter 已有函式相關結構，但 REPL `RUN` 尚未完整接上。 |
-| 遞迴 | 開發中 | Interpreter 已有 call scope 設計，但需要透過完整 `RUN` 流程驗證。 |
+| 函式定義 | 部分完成 | Parser、symbol table、interpreter 與 `RUN` main 流程已接上；完整 `CHECK` 語意檢查仍待補。 |
+| 遞迴 | 已實作 | Interpreter 已支援獨立 call scope，並有 regression tests。 |
 | 陣列 | 部分完成 | 虛擬記憶體支援陣列配置、讀寫與邊界檢查。 |
 | 指標 | 部分完成 | 支援模擬位址、解參考、指標讀寫與部分指標算術。 |
-| 字串 | 部分完成 | 字串常數與 `char*` 相關內建函式已有部分支援。 |
+| 字串 | 部分完成 | 支援字串常數、`char` 陣列與多數字串 built-ins；`scanf` 目前只支援 `%d` / `%c`。 |
 
 ## 內建函式支援狀態
 
@@ -121,11 +121,11 @@ sc> EXIT
 | `puts` | 已實作。 |
 | `putchar` | 已實作。 |
 | `getchar` | 已實作基本版本。 |
-| `scanf` | 尚未完成，目前為空實作。 |
+| `scanf` | 部分實作，支援 `%d`、`%c`；不支援 `%s`。 |
 | `strlen` | 已實作。 |
 | `strcpy` | 已實作。 |
 | `strcmp` | 已實作。 |
-| `strcat` | 尚未完成或尚未接上完整流程，需後續確認。 |
+| `strcat` | 已實作。 |
 | `abs` | 已實作。 |
 | `max` | 已實作。 |
 | `min` | 已實作。 |
@@ -139,6 +139,7 @@ sc> EXIT
 | `sizeof_char` | 已實作。 |
 | `atoi` | 已實作。 |
 | `itoa` | 已實作。 |
+| `exit` | 尚未實作；目前僅在 FUNCS / signature 中列出。 |
 
 ## 專案架構
 
@@ -164,28 +165,39 @@ sc> EXIT
 - 基本 REPL 入口與 `sc>` 提示符。
 - 單行 Small-C 程式碼的 lex / parse / evaluate 流程。
 - 程式緩衝區基本編輯功能。
-- `SAVE` 寫檔功能。
+- `LOAD` / `SAVE` 檔案載入與寫入功能。
+- `RUN` 可從 buffer 執行 `main()` 並輸出 return value。
+- `CHECK` 已接上 lexer/parser 基礎檢查，且不執行程式。
 - 虛擬記憶體配置、讀寫、陣列邊界檢查與指標檢查。
 - 符號表 scope stack、變數表與函式表。
 - 多數數學與字串相關內建函式。
+- `scanf("%d")` / `scanf("%c")`。
+- `strcat`。
+- pytest regression tests。
 - `#define` 簡單數值巨集。
 - `int`、`char`、`int*`、`char*` 的部分執行期支援。
 
 ### 開發中或尚未完成
 
-- `LOAD` 指令。
-- `RUN` 指令。
-- `CHECK` 指令。
-- `scanf` 內建函式。
+- `CHECK` 完整語意檢查。
 - 完整 trace 輸出。
-- 完整 main function 執行流程。
-- 自動化測試目錄與 `.expected` 比對流程。
-- 未儲存修改時的覆蓋確認。
+- `exit(int code)` 內建函式。
+- `.sc/.expected` 驗收測試檔與自動化比對流程。
+- `APPEND` / `INSERT` 保留縮排與行號提示格式。
 - 啟動畫面與版本資訊仍需補齊。
 
 ## 測試方式
 
-目前專案尚未提供正式 `tests/` 目錄與 `.sc/.expected` 測試檔。現階段可先使用手動測試方式確認 REPL 與核心模組是否正常。
+目前專案已提供 pytest regression tests，涵蓋 lexer、interpreter、REPL buffer 與 REPL main 部分流程；正式 `.sc/.expected` 驗收測試檔與 runner 仍待補齊。
+
+### Pytest regression tests
+
+建議先分組執行，避免互動測試問題和核心 interpreter 測試混在一起：
+
+```bash
+python -m pytest tests/test_interpreter.py -q
+python -m pytest tests/test_lexer.py tests/test_repl_buffer.py tests/test_repl_main.py -q
+```
 
 ### 手動啟動測試
 
@@ -220,7 +232,7 @@ sc> LIST
 sc> SAVE demo.sc
 ```
 
-### 建議後續測試目錄
+### 建議後續 `.sc/.expected` 測試目錄
 
 建議後續補上：
 
@@ -250,12 +262,12 @@ tests/
 
 ## 已知限制
 
-- `RUN` 尚未完成，因此完整 `.sc` 程式的載入與從 `main()` 執行流程尚不能作為完成狀態。
-- `LOAD` 尚未完成，因此目前無法直接從檔案載入程式緩衝區。
-- `CHECK` 尚未完成，因此目前尚無單獨語法 / 語意檢查流程。
-- `scanf` 尚未實作。
+- `CHECK` 目前主要檢查詞法與語法，尚未完整檢查未定義符號、型別、return、`break` / `continue` 位置等語意錯誤。
 - `TRACE ON/OFF` 目前只切換狀態，尚未完整輸出每個 statement 的執行紀錄。
-- 目前沒有正式自動化測試器。
+- `scanf` 目前只支援 `%d` / `%c`，不支援 `%s`，且不保留跨次呼叫未消耗輸入。
+- `exit(int code)` 尚未實作。
+- 目前沒有 `.sc/.expected` 自動化驗收測試器。
+- `APPEND` / `INSERT` 目前會移除前導空白，縮排保留仍待修正。
 - 啟動時尚未顯示完整歡迎訊息、版本資訊與說明文字。
 - 錯誤訊息雖然多處已有處理，但仍需完整測試以避免 Python traceback 洩漏。
 
@@ -263,13 +275,11 @@ tests/
 
 | 優先度 | 項目 |
 |---|---|
-| P0 | 完成 `RUN`，支援從 buffer parse 並執行 `main()`。 |
-| P0 | 完成 `LOAD`，支援讀取 `.sc` 檔案到 buffer。 |
-| P0 | 完成 `CHECK`，支援不執行程式的語法與語意檢查。 |
-| P1 | 補齊 `scanf`。 |
+| P0 | 補完整 `CHECK` semantic checker。 |
 | P1 | 完成 trace statement 輸出。 |
-| P1 | 建立 `tests/` 測試資料與自動化測試工具。 |
-| P1 | 補齊未儲存修改提示。 |
+| P1 | 實作 `exit(int code)`。 |
+| P1 | 修正 `APPEND` / `INSERT` 提示格式與縮排保留。 |
+| P1 | 建立 `.sc/.expected` 驗收測試資料與 runner。 |
 | P2 | 補完整專題報告與驗收清單。 |
 
 ## 授權

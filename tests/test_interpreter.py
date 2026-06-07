@@ -772,10 +772,503 @@ class TestInterpreterPrintf:
         out = _filter_debug(capsys.readouterr().out)
         assert "1 + 2 = 3" in out
 
+
+class TestInterpreterStringBuiltins:
+    """測試字串相關內建函式，例如 puts、strcpy、strcat。"""
+
     def test_puts_outputs_string(self, fresh_interp, capsys):
         _run_code(fresh_interp, 'char msg[6] = "hello";\nputs(msg);')
         out = _filter_debug(capsys.readouterr().out)
         assert "hello" in out
+
+    def test_strcat_appends_string(self, fresh_interp):
+        _run_code(fresh_interp, 'char msg[20];\nstrcpy(msg, "Hello");\nstrcat(msg, " World");')
+
+        sym = fresh_interp.symtable.lookup_var("msg")
+        assert fresh_interp.memory.read_cstring(sym.addr) == "Hello World"
+
+    def test_strcat_empty_dest(self, fresh_interp):
+        _run_code(fresh_interp, 'char msg[10];\nstrcpy(msg, "");\nstrcat(msg, "abc");')
+
+        sym = fresh_interp.symtable.lookup_var("msg")
+        assert fresh_interp.memory.read_cstring(sym.addr) == "abc"
+
+    def test_strcat_empty_src(self, fresh_interp):
+        _run_code(fresh_interp, 'char msg[10];\nstrcpy(msg, "abc");\nstrcat(msg, "");')
+
+        sym = fresh_interp.symtable.lookup_var("msg")
+        assert fresh_interp.memory.read_cstring(sym.addr) == "abc"
+
+    def test_strcat_buffer_exact_fit(self, fresh_interp):
+        _run_code(fresh_interp, 'char msg[6];\nstrcpy(msg, "Hel");\nstrcat(msg, "lo");')
+
+        sym = fresh_interp.symtable.lookup_var("msg")
+        assert fresh_interp.memory.read_cstring(sym.addr) == "Hello"
+
+    def test_strcat_buffer_overflow_raises(self, fresh_interp):
+        _run_code(fresh_interp, 'char msg[6];\nstrcpy(msg, "Hello");')
+
+        with pytest.raises(Exception) as exc:
+            _run_code(fresh_interp, 'strcat(msg, "!");')
+
+        message = str(exc.value)
+        assert "buffer overflow" in message or "exceeds allocation" in message
+
+    def test_strcat_type_mismatch_raises(self, fresh_interp):
+        _run_code(fresh_interp, "int x = 0;")
+
+        with pytest.raises(Exception) as exc:
+            _run_code(fresh_interp, 'strcat(&x, "abc");')
+
+        message = str(exc.value)
+        assert "strcat expects char* for dest" in message
+        assert "int*" in message
+
+    def test_strcat_src_type_mismatch_raises(self, fresh_interp):
+        _run_code(fresh_interp, 'char msg[10] = "abc";\nint x = 0;')
+
+        with pytest.raises(Exception) as exc:
+            _run_code(fresh_interp, "strcat(msg, &x);")
+
+        message = str(exc.value)
+        assert "strcat expects char* for src" in message
+        assert "int*" in message
+
+
+class TestInterpreterIOBuiltins:
+    """測試輸入輸出相關 built-ins：puts、putchar、getchar、scanf。"""
+
+    @pytest.mark.parametrize(
+        "code, expected",
+        [
+            ('puts("hello");', "hello\n"),
+            ('puts("");', "\n"),
+            ('char msg[6] = "hello";\nputs(msg);', "hello\n"),
+            ('puts("hello world");', "hello world\n"),
+        ],
+    )
+    def test_puts_outputs_supported_strings(self, fresh_interp, capsys, code, expected):
+        _run_code(fresh_interp, code)
+        assert capsys.readouterr().out == expected
+
+    def test_puts_type_mismatch_raises(self, fresh_interp):
+        with pytest.raises(Exception) as exc:
+            _run_code(fresh_interp, "puts(123);")
+
+        assert "puts expects char*" in str(exc.value)
+
+    @pytest.mark.parametrize(
+        "code, expected_output, expected_return",
+        [
+            ("int r = putchar(65);", "A", 65),
+            ("int r = putchar(10);", "\n", 10),
+            ("int r = putchar(0);", "\x00", 0),
+            ("int r = putchar(127);", "\x7f", 127),
+        ],
+    )
+    def test_putchar_outputs_and_returns_char_code(self, fresh_interp, capsys, code, expected_output, expected_return):
+        _run_code(fresh_interp, code)
+
+        assert capsys.readouterr().out == expected_output
+        assert _get_int(fresh_interp, "r") == expected_return
+
+    @pytest.mark.parametrize("code", ["putchar(-1);", "putchar(128);"])
+    def test_putchar_out_of_ascii_range_raises(self, fresh_interp, code):
+        with pytest.raises(Exception) as exc:
+            _run_code(fresh_interp, code)
+
+        assert "putchar expects ASCII code" in str(exc.value)
+
+    @pytest.mark.parametrize(
+        "input_text, expected",
+        [
+            ("A", 65),
+            ("", -1),
+            ("abc", 97),
+            ("7", 55),
+            ("!", 33),
+        ],
+    )
+    def test_getchar_reads_first_character_or_eof(self, fresh_interp, monkeypatch, input_text, expected):
+        monkeypatch.setattr("builtins.input", lambda prompt="": input_text)
+
+        _run_code(fresh_interp, "int ch = getchar();")
+
+        assert _get_int(fresh_interp, "ch") == expected
+
+    def test_scanf_reads_char_only(self, fresh_interp, monkeypatch):
+        monkeypatch.setattr("builtins.input", lambda prompt="": "Z")
+
+        _run_code(fresh_interp, 'char ch = 0; int n = scanf("%c", &ch);')
+
+        assert _get_char(fresh_interp, "ch") == ord("Z")
+        assert _get_int(fresh_interp, "n") == 1
+
+    def test_scanf_unsupported_format_raises(self, fresh_interp, monkeypatch):
+        monkeypatch.setattr("builtins.input", lambda prompt="": "abc")
+        _run_code(fresh_interp, "char msg[10];")
+
+        with pytest.raises(Exception) as exc:
+            _run_code(fresh_interp, 'scanf("%s", msg);')
+
+        assert "scanf unsupported format specifier %s" in str(exc.value)
+
+
+class TestInterpreterStringBuiltinCases:
+    """用參數化測試補齊 strlen、strcpy、strcmp、atoi、itoa 的主要路徑。"""
+
+    @pytest.mark.parametrize(
+        "code, expected",
+        [
+            ('int n = strlen("hello");', 5),
+            ('int n = strlen("");', 0),
+            ('int n = strlen("a b c");', 5),
+            ('char msg[6] = "hello";\nint n = strlen(msg);', 5),
+        ],
+    )
+    def test_strlen_supported_strings(self, fresh_interp, code, expected):
+        _run_code(fresh_interp, code)
+
+        assert _get_int(fresh_interp, "n") == expected
+
+    def test_strlen_type_mismatch_raises(self, fresh_interp):
+        with pytest.raises(Exception) as exc:
+            _run_code(fresh_interp, "strlen(123);")
+
+        assert "strlen expects char*" in str(exc.value)
+
+    @pytest.mark.parametrize(
+        "code, expected",
+        [
+            ('char msg[10];\nstrcpy(msg, "abc");', "abc"),
+            ('char msg[10];\nstrcpy(msg, "");', ""),
+            ('char msg[4];\nstrcpy(msg, "abc");', "abc"),
+            ('char msg[6] = "hello";\nstrcpy(msg, "hi");', "hi"),
+        ],
+    )
+    def test_strcpy_copies_supported_strings(self, fresh_interp, code, expected):
+        _run_code(fresh_interp, code)
+
+        sym = fresh_interp.symtable.lookup_var("msg")
+        assert fresh_interp.memory.read_cstring(sym.addr) == expected
+
+    def test_strcpy_buffer_overflow_raises(self, fresh_interp):
+        _run_code(fresh_interp, "char msg[3];")
+
+        with pytest.raises(Exception) as exc:
+            _run_code(fresh_interp, 'strcpy(msg, "abc");')
+
+        message = str(exc.value)
+        assert "buffer overflow" in message or "exceeds allocation" in message
+
+    def test_strcpy_type_mismatch_raises(self, fresh_interp):
+        _run_code(fresh_interp, "int x = 0;")
+
+        with pytest.raises(Exception) as exc:
+            _run_code(fresh_interp, 'strcpy(&x, "abc");')
+
+        assert "strcpy expects char* for dest" in str(exc.value)
+
+    @pytest.mark.parametrize(
+        "code, expected_sign",
+        [
+            ('int r = strcmp("abc", "abc");', 0),
+            ('int r = strcmp("abc", "abd");', -1),
+            ('int r = strcmp("abd", "abc");', 1),
+            ('int r = strcmp("abc", "abcd");', -1),
+            ('int r = strcmp("", "");', 0),
+        ],
+    )
+    def test_strcmp_returns_c_style_ordering(self, fresh_interp, code, expected_sign):
+        _run_code(fresh_interp, code)
+
+        value = _get_int(fresh_interp, "r")
+        if expected_sign < 0:
+            assert value < 0
+        elif expected_sign > 0:
+            assert value > 0
+        else:
+            assert value == 0
+
+    @pytest.mark.parametrize(
+        "code, expected",
+        [
+            ('int n = atoi("123");', 123),
+            ('int n = atoi("   42");', 42),
+            ('int n = atoi("-17");', -17),
+            ('int n = atoi("12abc");', 12),
+            ('int n = atoi("abc");', 0),
+        ],
+    )
+    def test_atoi_converts_c_style_integer_prefix(self, fresh_interp, code, expected):
+        _run_code(fresh_interp, code)
+
+        assert _get_int(fresh_interp, "n") == expected
+
+    @pytest.mark.parametrize(
+        "code, expected",
+        [
+            ('char msg[4];\nitoa(123, msg);', "123"),
+            ('char msg[5];\nitoa(-12, msg);', "-12"),
+            ('char msg[2];\nitoa(0, msg);', "0"),
+            ('char msg[2];\nitoa(9, msg);', "9"),
+        ],
+    )
+    def test_itoa_writes_decimal_string(self, fresh_interp, code, expected):
+        _run_code(fresh_interp, code)
+
+        sym = fresh_interp.symtable.lookup_var("msg")
+        assert fresh_interp.memory.read_cstring(sym.addr) == expected
+
+    def test_itoa_buffer_overflow_raises(self, fresh_interp):
+        _run_code(fresh_interp, "char msg[2];")
+
+        with pytest.raises(Exception) as exc:
+            _run_code(fresh_interp, "itoa(10, msg);")
+
+        message = str(exc.value)
+        assert "buffer overflow" in message or "exceeds allocation" in message
+
+
+class TestInterpreterMemoryBuiltins:
+    """測試 memset 對 char buffer 的寫入、邊界與型別檢查。"""
+
+    @pytest.mark.parametrize(
+        "code, expected",
+        [
+            ('char msg[4] = "abc";\nmemset(msg, 65, 3);', "AAA"),
+            ('char msg[4] = "abc";\nmemset(msg, 90, 2);', "ZZc"),
+            ('char msg[4] = "abc";\nmemset(msg, 88, 0);', "abc"),
+            ('char msg[2] = "x";\nmemset(msg, 300, 1);', ","),
+        ],
+    )
+    def test_memset_writes_char_memory(self, fresh_interp, code, expected):
+        _run_code(fresh_interp, code)
+
+        sym = fresh_interp.symtable.lookup_var("msg")
+        assert fresh_interp.memory.read_cstring(sym.addr) == expected
+
+    def test_memset_type_mismatch_raises(self, fresh_interp):
+        with pytest.raises(Exception) as exc:
+            _run_code(fresh_interp, "memset(1, 0, 1);")
+
+        assert "memset expects char* for ptr" in str(exc.value)
+
+
+class TestInterpreterMathBuiltins:
+    """測試數學與隨機數 built-ins。"""
+
+    @pytest.mark.parametrize(
+        "code, expected",
+        [
+            ("int x = abs(5);", 5),
+            ("int x = abs(-5);", 5),
+            ("int x = abs(0);", 0),
+            ("int x = abs(-123456);", 123456),
+        ],
+    )
+    def test_abs_values(self, fresh_interp, code, expected):
+        _run_code(fresh_interp, code)
+        assert _get_int(fresh_interp, "x") == expected
+
+    def test_abs_type_mismatch_raises(self, fresh_interp):
+        with pytest.raises(Exception) as exc:
+            _run_code(fresh_interp, 'abs("x");')
+
+        assert "abs expects int" in str(exc.value)
+
+    @pytest.mark.parametrize(
+        "code, expected",
+        [
+            ("int x = max(5, 3);", 5),
+            ("int x = max(3, 5);", 5),
+            ("int x = max(5, 5);", 5),
+            ("int x = max(-2, -5);", -2),
+        ],
+    )
+    def test_max_values(self, fresh_interp, code, expected):
+        _run_code(fresh_interp, code)
+        assert _get_int(fresh_interp, "x") == expected
+
+    def test_max_type_mismatch_raises(self, fresh_interp):
+        with pytest.raises(Exception) as exc:
+            _run_code(fresh_interp, 'max(1, "x");')
+
+        assert "max expects int" in str(exc.value)
+
+    @pytest.mark.parametrize(
+        "code, expected",
+        [
+            ("int x = min(3, 5);", 3),
+            ("int x = min(5, 3);", 3),
+            ("int x = min(5, 5);", 5),
+            ("int x = min(-2, -5);", -5),
+        ],
+    )
+    def test_min_values(self, fresh_interp, code, expected):
+        _run_code(fresh_interp, code)
+        assert _get_int(fresh_interp, "x") == expected
+
+    def test_min_type_mismatch_raises(self, fresh_interp):
+        with pytest.raises(Exception) as exc:
+            _run_code(fresh_interp, 'min("x", 1);')
+
+        assert "min expects int" in str(exc.value)
+
+    @pytest.mark.parametrize(
+        "code, expected",
+        [
+            ("int x = pow(2, 10);", 1024),
+            ("int x = pow(2, 0);", 1),
+            ("int x = pow(2, 1);", 2),
+            ("int x = pow(2, -1);", 0),
+        ],
+    )
+    def test_pow_values(self, fresh_interp, code, expected):
+        _run_code(fresh_interp, code)
+        assert _get_int(fresh_interp, "x") == expected
+
+    def test_pow_type_mismatch_raises(self, fresh_interp):
+        with pytest.raises(Exception) as exc:
+            _run_code(fresh_interp, 'pow("x", 2);')
+
+        assert "pow expects int" in str(exc.value)
+
+    @pytest.mark.parametrize(
+        "code, expected",
+        [
+            ("int x = sqrt(144);", 12),
+            ("int x = sqrt(150);", 12),
+            ("int x = sqrt(0);", 0),
+        ],
+    )
+    def test_sqrt_values(self, fresh_interp, code, expected):
+        _run_code(fresh_interp, code)
+        assert _get_int(fresh_interp, "x") == expected
+
+    def test_sqrt_negative_raises(self, fresh_interp):
+        with pytest.raises(Exception) as exc:
+            _run_code(fresh_interp, "sqrt(-1);")
+
+        assert "non-negative" in str(exc.value)
+
+    def test_sqrt_type_mismatch_raises(self, fresh_interp):
+        with pytest.raises(Exception) as exc:
+            _run_code(fresh_interp, 'sqrt("x");')
+
+        assert "sqrt expects int" in str(exc.value)
+
+    @pytest.mark.parametrize(
+        "code, expected",
+        [
+            ("int x = mod(10, 3);", 1),
+            ("int x = mod(-10, 3);", -1),
+            ("int x = mod(10, -3);", 1),
+        ],
+    )
+    def test_mod_values(self, fresh_interp, code, expected):
+        _run_code(fresh_interp, code)
+        assert _get_int(fresh_interp, "x") == expected
+
+    def test_mod_zero_divisor_raises(self, fresh_interp):
+        with pytest.raises(Exception) as exc:
+            _run_code(fresh_interp, "mod(1, 0);")
+
+        assert "division by zero" in str(exc.value)
+
+    def test_mod_type_mismatch_raises(self, fresh_interp):
+        with pytest.raises(Exception) as exc:
+            _run_code(fresh_interp, 'mod("x", 1);')
+
+        assert "mod expects int" in str(exc.value)
+
+    def test_rand_default_value_in_range(self, fresh_interp):
+        _run_code(fresh_interp, "int r = rand();")
+        assert 0 <= _get_int(fresh_interp, "r") <= 32767
+
+    def test_rand_multiple_values_in_range(self, fresh_interp):
+        _run_code(fresh_interp, "int a = rand(); int b = rand();")
+        assert 0 <= _get_int(fresh_interp, "a") <= 32767
+        assert 0 <= _get_int(fresh_interp, "b") <= 32767
+
+    def test_rand_after_srand_in_range(self, fresh_interp):
+        _run_code(fresh_interp, "srand(42); int r = rand();")
+        assert 0 <= _get_int(fresh_interp, "r") <= 32767
+
+    def test_rand_too_many_arguments_raises(self, fresh_interp):
+        with pytest.raises(Exception) as exc:
+            _run_code(fresh_interp, "rand(1);")
+
+        assert "rand" in str(exc.value)
+
+    def test_rand_reproducible_after_same_seed(self, fresh_interp):
+        _run_code(fresh_interp, "srand(7); int a = rand(); srand(7); int b = rand();")
+        assert _get_int(fresh_interp, "a") == _get_int(fresh_interp, "b")
+
+    @pytest.mark.parametrize("seed", [42, 0, -7])
+    def test_srand_same_seed_reproduces_sequence(self, fresh_interp, seed):
+        _run_code(fresh_interp, f"srand({seed}); int a = rand(); srand({seed}); int b = rand();")
+        assert _get_int(fresh_interp, "a") == _get_int(fresh_interp, "b")
+
+    def test_srand_type_mismatch_raises(self, fresh_interp):
+        with pytest.raises(Exception) as exc:
+            _run_code(fresh_interp, 'srand("x");')
+
+        assert "srand expects int" in str(exc.value)
+
+    def test_srand_missing_argument_raises(self, fresh_interp):
+        with pytest.raises(Exception) as exc:
+            _run_code(fresh_interp, "srand();")
+
+        assert "srand" in str(exc.value)
+
+
+class TestInterpreterUtilityBuiltins:
+    """測試 sizeof_* 與目前尚未實作的 exit 狀態。"""
+
+    @pytest.mark.parametrize(
+        "code, expected",
+        [
+            ("int x = sizeof_int();", 4),
+            ("int x = sizeof_int() + 2;", 6),
+            ("int x = sizeof_int() * 3;", 12),
+            ("int a = sizeof_int(); int b = sizeof_int(); int x = a + b;", 8),
+        ],
+    )
+    def test_sizeof_int_values(self, fresh_interp, code, expected):
+        _run_code(fresh_interp, code)
+        assert _get_int(fresh_interp, "x") == expected
+
+    def test_sizeof_int_too_many_arguments_raises(self, fresh_interp):
+        with pytest.raises(Exception) as exc:
+            _run_code(fresh_interp, "sizeof_int(1);")
+
+        assert "sizeof_int" in str(exc.value)
+
+    @pytest.mark.parametrize(
+        "code, expected",
+        [
+            ("int x = sizeof_char();", 1),
+            ("int x = sizeof_char() + 2;", 3),
+            ("int x = sizeof_char() * 3;", 3),
+            ("int a = sizeof_char(); int b = sizeof_char(); int x = a + b;", 2),
+        ],
+    )
+    def test_sizeof_char_values(self, fresh_interp, code, expected):
+        _run_code(fresh_interp, code)
+        assert _get_int(fresh_interp, "x") == expected
+
+    def test_sizeof_char_too_many_arguments_raises(self, fresh_interp):
+        with pytest.raises(Exception) as exc:
+            _run_code(fresh_interp, "sizeof_char(1);")
+
+        assert "sizeof_char" in str(exc.value)
+
+    def test_exit_is_listed_but_not_implemented_yet(self, fresh_interp):
+        with pytest.raises(Exception) as exc:
+            _run_code(fresh_interp, "exit(0);")
+
+        assert "exit" in str(exc.value).lower()
 
 
 class TestInterpreterErrors:
@@ -832,13 +1325,42 @@ class TestInterpreterErrors:
         assert "expects at least 1 arguments" in message
         assert "got 0" in message
 
-    def test_builtin_return_type_mismatch_raises(self, fresh_interp):
-        # scanf 目前尚未實作，builtins.py 會回傳 None；外層簽名檢查應抓出 int 回傳型別不符。
+    def test_scanf_reads_int_and_returns_count(self, fresh_interp, monkeypatch):
+        monkeypatch.setattr("builtins.input", lambda prompt="": "123")
+
+        _run_code(fresh_interp, 'int x = 0; int n = 0; n = scanf("%d", &x);')
+
+        assert _get_int(fresh_interp, "x") == 123
+        assert _get_int(fresh_interp, "n") == 1
+
+    def test_scanf_reads_int_and_char(self, fresh_interp, monkeypatch):
+        monkeypatch.setattr("builtins.input", lambda prompt="": "123 A")
+
+        _run_code(fresh_interp, 'int x = 0; char ch = 0; int n = 0; n = scanf("%d %c", &x, &ch);')
+
+        assert _get_int(fresh_interp, "x") == 123
+        assert _get_char(fresh_interp, "ch") == ord("A")
+        assert _get_int(fresh_interp, "n") == 2
+
+    def test_scanf_input_mismatch_returns_success_count(self, fresh_interp, monkeypatch):
+        monkeypatch.setattr("builtins.input", lambda prompt="": "123 abc")
+
+        _run_code(fresh_interp, 'int a = 0; int b = 7; int n = 0; n = scanf("%d %d", &a, &b);')
+
+        assert _get_int(fresh_interp, "a") == 123
+        assert _get_int(fresh_interp, "b") == 7
+        assert _get_int(fresh_interp, "n") == 1
+
+    def test_scanf_type_mismatch_raises(self, fresh_interp, monkeypatch):
+        monkeypatch.setattr("builtins.input", lambda prompt="": "A")
+        _run_code(fresh_interp, "int x = 0;")
+
         with pytest.raises(Exception) as exc:
-            _run_code(fresh_interp, 'scanf("%d");')
+            _run_code(fresh_interp, 'scanf("%c", &x);')
+
         message = str(exc.value)
-        assert "scanf" in message
-        assert "must return int" in message
+        assert "scanf expects char* for %c" in message
+        assert "int*" in message
 
     def test_user_function_argument_count_raises(self, fresh_interp):
         _run_code(fresh_interp, "int add(int a, int b) { return a + b; }")
