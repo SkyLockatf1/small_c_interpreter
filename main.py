@@ -58,7 +58,14 @@ def analyze_program(source: str, macro_definitions: dict[str, str], line_start: 
 
 def program_has_main(program: list) -> bool:
     """檢查完整程式 AST 是否定義了 main()。"""
-    return any(isinstance(ast, parser.FunctionDef) and ast.name == "main" for ast in program)
+    return find_main_function(program) is not None
+
+def find_main_function(program: list):
+    """回傳 main() 的 FunctionDef AST；沒有 main 時回傳 None。"""
+    for ast in program:
+        if isinstance(ast, parser.FunctionDef) and ast.name == "main":
+            return ast
+    return None
 
 def load_program_declarations(runtime: interpreter.Interpreter, program: list) -> None:
     """只載入完整程式的函式定義與全域宣告，不執行 top-level 裸露語句。"""
@@ -77,7 +84,8 @@ def run_program_buffer(buffer: list[str], macro_definitions: dict[str, str], tra
 
     source = "\n".join(buffer) + "\n"
     program = analyze_program(source, dict(macro_definitions))
-    if not program_has_main(program):
+    main_function = find_main_function(program)
+    if main_function is None:
         print("Error: main function not found.")
         return None
 
@@ -85,7 +93,7 @@ def run_program_buffer(buffer: list[str], macro_definitions: dict[str, str], tra
     # 函式定義與全域宣告只是 RUN 前的載入流程，不屬於 main() 的逐步執行 trace。
     load_program_declarations(runtime, program)
 
-    main_call = parser.CallExpr(parser.Identifier("main", 0), [], 0)
+    main_call = parser.CallExpr(parser.Identifier("main", main_function.line), [], main_function.line)
     # TRACE 需要保留 buffer 原始行文字，才能用 AST line number 找回使用者輸入的語句。
     runtime.trace_source_lines = {line_number: line for line_number, line in enumerate(buffer, start=1)}
     runtime.trace_enabled = trace_enabled
