@@ -7,315 +7,342 @@
 
 ## 專案簡介
 
-`Small-C Interpreter` 是一個以 Python 實作的 Small-C 互動式解譯器，目標是作為系統軟體期末專題使用。專案提供類似早期 BASIC 解譯器的 REPL 互動環境，讓使用者可以逐行輸入 Small-C 程式碼，並透過程式緩衝區管理、詞法分析、語法分析、符號表、虛擬記憶體與直譯執行等模組，模擬 C-like 語言的執行流程。
+`Small-C Interpreter` 是一個以 Python 實作的 Small-C 互動式解譯器，版本為 `v3.0`。本專案作為系統軟體期末專題，整合詞法分析、語法分析、語意檢查、符號表、虛擬記憶體、AST 直譯執行、內建函式與互動式 REPL 指令，模擬一個 C-like 子集語言的完整執行流程。
 
-本專案目前仍在開發中，部分作業規格功能尚未完整接上。本文件會誠實標示目前已完成、部分完成與待完成項目，方便後續開發、除錯與期末驗收檢查。
+使用者可以在 REPL 中逐行輸入 Small-C 程式碼立即執行，也可以透過程式緩衝區載入、編輯、檢查、追蹤與執行完整 `.sc` 原始碼檔案。專案另外提供 Textual TUI 前端，方便以文字介面編輯與執行程式。
 
-## 課程資訊
+## 專案資訊
 
 | 項目 | 內容 |
 |---|---|
 | 專案名稱 | Small-C Interpreter |
-| 課程 | TODO |
+| 版本 | v3.0 |
+| 課程 | 系統軟體期末專題 |
 | 學期 | Spring 2026 |
-| 作者 | TODO |
-| 學號 | TODO |
-| 指導教師 | TODO |
+| 授權 | MIT License |
 
 ## 執行環境
-
-建議使用下列環境執行：
 
 | 項目 | 需求 |
 |---|---|
 | Python | Python 3.10 以上 |
 | 作業系統 | Windows / macOS / Linux |
-| 第三方套件 | 目前未使用第三方套件 |
+| CLI REPL 第三方套件 | 無 |
+| Textual TUI 第三方套件 | `textual`、`tree-sitter`、`tree-sitter-c` |
 
 ## 快速開始
 
-在專案根目錄執行：
+在專案根目錄啟動命令列 REPL：
 
 ```bash
 python main.py
 ```
 
-Textual TUI frontend:
+Linux / macOS 也可以使用：
+
+```bash
+python3 main.py
+```
+
+啟動後會顯示版本資訊並進入 `sc>` 提示符：
+
+```text
+======================================
+Small-C Interactive Interpreter v3.0
+System Software Final Project , Spring 2026
+======================================
+sc>
+```
+
+## Textual TUI
+
+TUI 前端由 `main_tui.py` 提供，會重用既有的 lexer、parser、interpreter 與 repl 模組，並使用 tree-sitter 提供 Small-C/C 語法上色。
+
+安裝相依套件後啟動：
 
 ```bash
 pip install -r requirements.txt
 python main_tui.py
 ```
 
-The TUI editor uses tree-sitter based Small-C/C syntax highlighting for keywords such as `int`, `char`, `return`, `if`, `switch`, and `case`.
-
-Without installing dependencies globally:
+不安裝到全域環境時，可使用 `uv`：
 
 ```bash
 uv run --with textual --with tree-sitter --with tree-sitter-c python main_tui.py
 ```
 
-在 Linux / macOS 環境也可以使用：
+語法上色是可選功能；若 tree-sitter 初始化失敗，TUI 編輯器仍可正常使用。
 
-```bash
-python3 main.py
-```
+## REPL 使用範例
 
-啟動後會進入 REPL：
-
-```text
-sc>
-```
-
-## REPL 基本操作
+### 即時執行
 
 可以直接輸入 Small-C 程式碼：
-
-```c
-int x = 10;
-int y = 20;
-printf("%d\n", x + y);
-```
-
-也可以使用環境指令管理程式緩衝區，例如：
-
-```text
-sc> APPEND
-sc> LIST
-sc> SAVE demo.sc
-sc> VARS
-sc> EXIT
-```
-
-環境指令在主程式中會先轉成大寫再比對，因此 `list`、`LIST`、`List` 這類輸入形式會被視為相同指令。
-
-## 環境指令支援狀態
-
-| 指令 | 狀態 | 說明 |
-|---|---|---|
-| `LIST` | 已實作 | 可列出全部、單行或指定範圍的程式緩衝區內容。 |
-| `EDIT` | 已實作 | 可修改指定行；直接按 Enter 會保留原行，輸入內容會保留縮排。 |
-| `DELETE` | 已實作 | 可刪除單行或指定範圍。 |
-| `INSERT` | 已實作 | 可在指定行前插入多行，以單獨一行 `.` 結束。 |
-| `APPEND` | 已實作 | 可在緩衝區尾端追加多行，以單獨一行 `.` 結束，並保留輸入縮排。 |
-| `SAVE` | 已實作 | 可將目前緩衝區寫入檔案，並處理常見寫檔錯誤。 |
-| `NEW` | 已實作 | 可清空 buffer、重建 interpreter、清除 macro 狀態；若有未儲存修改會先提示確認。 |
-| `TRACE ON/OFF` | 已實作 | 可切換 trace 狀態；`RUN` 時會在每個 statement 執行前輸出行號與原始語句。 |
-| `VARS` | 已實作 | 可顯示目前全域變數、陣列與指標資訊。 |
-| `FUNCS` | 已實作 | 可列出目前 interpreter 內已註冊的使用者函式與 hard-coded built-ins。 |
-| `ABOUT` | 部分實作 | 已有 ASCII art 顯示，但專案資訊仍待補齊。 |
-| `CLEAR` | 已實作 | 可清除終端畫面。 |
-| `QUIT` / `EXIT` | 已實作 | 可離開 REPL。 |
-| `LOAD` | 已實作 | 可從檔案載入程式緩衝區，dirty buffer 時會先提示確認。 |
-| `RUN` | 已實作 | 會建立乾淨 runtime，載入全域宣告與函式，從 `main()` 執行並輸出 return value。 |
-| `CHECK` | 部分實作 | 已做 lexer/parser 檢查且不執行程式；完整語意檢查仍待補。 |
-| `HELP` | 已實作 | 支援 `HELP` 指令摘要與 `HELP <command>` 單一指令說明。 |
-
-## Small-C 語言支援狀態
-
-| 類別 | 狀態 | 說明 |
-|---|---|---|
-| 詞法分析 | 已實作核心功能 | 可將原始碼切成 keyword、identifier、number、hexadecimal、string、char、operator、punctuator 等 token，並保留 token 所在行號供錯誤訊息使用。 |
-| 詞法錯誤檢查 | 已實作多數檢查 | 可偵測未結束字串 / 字元常數、非法 escape sequence、未結束區塊註解、不支援的浮點常數，以及非法整數或十六進位 suffix。 |
-| 註解 | 已實作 | 支援 `//` 單行註解與非巢狀 `/* ... */` 區塊註解，區塊註解跨行時會維護行號。 |
-| `#define` | 部分完成 | 支援簡單十進位整數常數替換，例如 `#define MAX 100` 或 `#define N -1`；同一次 REPL 執行期間可跨輸入保存巨集，`NEW` 會清除巨集狀態。 |
-| 變數宣告 | 部分完成 | 支援 `int`、`char`、指標與陣列相關 AST / 執行邏輯。 |
-| 運算式 | 部分完成 | 支援多數算術、比較、邏輯、位元與指定運算。 |
-| 控制結構 | 部分完成 | Parser 與 interpreter 已有 `if`、`while`、`for`、`do while`、`break`、`continue` 相關結構。 |
-| 函式定義 | 部分完成 | Parser、symbol table、interpreter 與 `RUN` main 流程已接上；完整 `CHECK` 語意檢查仍待補。 |
-| 遞迴 | 已實作 | Interpreter 已支援獨立 call scope，並有 regression tests。 |
-| 陣列 | 部分完成 | 虛擬記憶體支援陣列配置、讀寫與邊界檢查。 |
-| 指標 | 部分完成 | 支援模擬位址、解參考、指標讀寫與部分指標算術。 |
-| 字串 | 部分完成 | 支援字串常數、`char` 陣列與多數字串 built-ins；`scanf` 目前只支援 `%d` / `%c`。 |
-
-## 內建函式支援狀態
-
-| 函式 | 狀態 |
-|---|---|
-| `printf` | 已實作基本版本，支援 `%d`、`%s`、`%c`、`%x`、`%%`。 |
-| `puts` | 已實作。 |
-| `putchar` | 已實作。 |
-| `getchar` | 已實作基本版本。 |
-| `scanf` | 部分實作，支援 `%d`、`%c`；不支援 `%s`。 |
-| `strlen` | 已實作。 |
-| `strcpy` | 已實作。 |
-| `strcmp` | 已實作。 |
-| `strcat` | 已實作。 |
-| `abs` | 已實作。 |
-| `max` | 已實作。 |
-| `min` | 已實作。 |
-| `pow` | 已實作。 |
-| `sqrt` | 已實作，負數會回報 runtime error。 |
-| `mod` | 已實作，除以零會回報 runtime error。 |
-| `rand` | 已實作。 |
-| `srand` | 已實作。 |
-| `memset` | 已實作。 |
-| `sizeof_int` | 已實作。 |
-| `sizeof_char` | 已實作。 |
-| `atoi` | 已實作。 |
-| `itoa` | 已實作。 |
-| `exit` | 尚未實作；目前僅在 FUNCS / signature 中列出。 |
-
-## 專案架構
-
-| 檔案 | 說明 |
-|---|---|
-| `main.py` | 程式進入點，包含 REPL 主迴圈、環境指令分派與即時輸入處理。 |
-| `repl.py` | REPL 輔助功能，例如 `LIST`、`EDIT`、`DELETE`、`INSERT`、`APPEND`、`SAVE`、`CLEAR`。 |
-| `lexer.py` | 詞法分析器，負責將 Small-C 原始碼切成 token。 |
-| `parser.py` | 語法分析器與 AST 節點定義，負責建立程式結構。 |
-| `interpreter.py` | AST 執行核心，負責變數、運算式、控制流程、函式呼叫與內建函式呼叫。 |
-| `memory.py` | 虛擬記憶體，使用 `bytearray` 模擬全域區、堆疊區、指標與陣列存取。 |
-| `symtable.py` | 符號表，管理變數、陣列、指標、函式與 scope stack。 |
-| `builtins.py` | Small-C 內建函式實作。 |
-| `extra_c_type.py` | 額外 C-like 型別包裝，例如 `int_ptr`、`char_ptr`、`array`。 |
-| `memory_api.md` | `memory.py` 的 API 文件。 |
-| `symtable_api.md` | `symtable.py` 的 API 文件。 |
-| `TODO.md` | 開發進度、已知問題與待完成項目。 |
-
-## 目前開發狀態
-
-### 已完成或大致可用
-
-- 基本 REPL 入口與 `sc>` 提示符。
-- 單行 Small-C 程式碼的 lex / parse / evaluate 流程。
-- 程式緩衝區基本編輯功能。
-- `LOAD` / `SAVE` 檔案載入與寫入功能。
-- `RUN` 可從 buffer 執行 `main()` 並輸出 return value。
-- `CHECK` 已接上 lexer/parser 基礎檢查，且不執行程式。
-- `TRACE ON/OFF` 可於 `RUN` 時輸出逐 statement trace，包含使用者函式內部語句。
-- 虛擬記憶體配置、讀寫、陣列邊界檢查與指標檢查。
-- 符號表 scope stack、變數表與函式表。
-- 多數數學與字串相關內建函式。
-- `scanf("%d")` / `scanf("%c")`。
-- `strcat`。
-- pytest regression tests。
-- `#define` 簡單數值巨集。
-- `int`、`char`、`int*`、`char*` 的部分執行期支援。
-
-### 開發中或尚未完成
-
-- `CHECK` 完整語意檢查。
-- `exit(int code)` 內建函式。
-- `.sc/.expected` 驗收測試檔與自動化比對流程。
-- `INSERT` 保留縮排與行號提示格式；`APPEND` 若要完全符合範例，可再改成顯示下一行行號。
-- 啟動畫面與版本資訊仍需補齊。
-
-## 測試方式
-
-目前專案已提供 pytest regression tests，涵蓋 lexer、interpreter、REPL buffer 與 REPL main 部分流程；正式 `.sc/.expected` 驗收測試檔與 runner 仍待補齊。
-
-### Pytest regression tests
-
-建議先分組執行，避免互動測試問題和核心 interpreter 測試混在一起：
-
-```bash
-python -m pytest tests/test_interpreter.py -q
-python -m pytest tests/test_lexer.py tests/test_repl_buffer.py tests/test_repl_main.py -q
-python -m pytest tests/test_check_semantics.py -q
-```
-
-也可以執行完整測試：
-
-```bash
-python -m pytest
-```
-
-目前完整測試通過：`380 passed`。
-
-### 手動啟動測試
-
-```bash
-python main.py
-```
-
-確認是否進入：
-
-```text
-sc>
-```
-
-### 手動 REPL 測試範例
 
 ```text
 sc> int x = 10;
 sc> int y = 20;
 sc> printf("%d\n", x + y);
-sc> VARS
+30
 ```
 
-### 程式緩衝區測試範例
+REPL 會保留全域變數狀態，可使用 `VARS` 查詢：
+
+```text
+sc> VARS
+int x = 10
+int y = 20
+```
+
+### 程式緩衝區
+
+也可以用 `APPEND` 建立完整程式，再透過 `CHECK` 與 `RUN` 執行：
 
 ```text
 sc> APPEND
 1> int main() {
-2>     return 0;
-3> }
-4> .
+2>     printf("Hello Small-C!\n");
+3>     return 0;
+4> }
+5> .
 sc> LIST
-sc> SAVE demo.sc
-```
-
-### TRACE 測試範例
-
-```text
-sc> TRACE ON
-Trace mode enabled.
+sc> CHECK
+No errors found.
 sc> RUN
-[line 2] int result;
-[line 3] result = gcd(48, 18);
-...
-sc> TRACE OFF
-Trace mode disabled.
+Hello Small-C!
+Program exited with return value 0.
 ```
 
-### 建議後續 `.sc/.expected` 測試目錄
+環境指令不區分大小寫，例如 `list`、`LIST`、`List` 都會被視為同一個指令。Small-C 語言本身仍依照 C-like 慣例處理大小寫，因此 `value` 與 `Value` 是不同識別字。
 
-建議後續補上：
+## 環境指令
+
+### 程式管理
+
+| 指令 | 功能 |
+|---|---|
+| `LOAD <filename>` | 從檔案載入 Small-C 原始碼到程式緩衝區；若目前 buffer 有未儲存修改，會先提示確認。 |
+| `SAVE <filename>` | 將目前程式緩衝區寫入檔案。 |
+| `LIST` | 列出整個程式緩衝區。 |
+| `LIST <n>` | 列出第 `n` 行。 |
+| `LIST <n1>-<n2>` | 列出第 `n1` 行到第 `n2` 行。 |
+| `EDIT <n>` | 修改第 `n` 行；直接按 Enter 會保留原行。 |
+| `DELETE <n>` | 刪除第 `n` 行。 |
+| `DELETE <n1>-<n2>` | 刪除指定範圍。 |
+| `INSERT <n>` | 在第 `n` 行前插入多行，以單獨一行 `.` 結束。 |
+| `APPEND` | 在緩衝區尾端追加多行，以單獨一行 `.` 結束。 |
+| `NEW` | 清空 buffer、重建 interpreter、清除 macro 狀態；若目前 buffer 有未儲存修改，會先提示確認。 |
+
+### 執行與除錯
+
+| 指令 | 功能 |
+|---|---|
+| `RUN` | 建立乾淨 runtime，載入全域宣告與函式，從 `main()` 執行目前 buffer。 |
+| `CHECK` | 執行 lexer、parser 與 semantic checker，不執行程式。 |
+| `TRACE ON` | 開啟 trace 模式；`RUN` 時會在每個 statement 執行前輸出行號與原始語句。 |
+| `TRACE OFF` | 關閉 trace 模式。 |
+| `VARS` | 顯示目前全域變數、陣列與指標資訊。 |
+| `FUNCS` | 列出使用者函式與內建函式 signature。 |
+
+### 系統指令
+
+| 指令 | 功能 |
+|---|---|
+| `HELP` | 顯示所有可用指令摘要。 |
+| `HELP <command>` | 顯示指定指令說明。 |
+| `ABOUT` | 顯示解譯器名稱、版本與專案資訊。 |
+| `CLEAR` | 清除終端畫面。 |
+| `QUIT` / `EXIT` | 結束 REPL；若目前 buffer 有未儲存修改，會先提示確認。 |
+
+## Small-C 語言功能
+
+### 型別與宣告
+
+支援的 Small-C 型別與宣告形式：
+
+```c
+int x;
+int y = 10;
+char ch = 'A';
+int arr[20];
+char str[80];
+int *ptr;
+char *cp;
+```
+
+支援項目包含：
+
+- `int`、`char`、`int*`、`char*`。
+- 函式回傳型別 `int`、`char`、`void`。
+- 全域變數、函式區域變數、參數與一維陣列。
+- 陣列索引從 `0` 開始，越界時回報 runtime error。
+- 字串常數以 C string 形式存入記憶體，並以 `\0` 結尾。
+
+### 常數與註解
+
+支援項目包含：
+
+- 十進位整數，例如 `42`、`-7`。
+- 十六進位整數，例如 `0xFF`、`0X0F`。
+- 字元常數，例如 `'A'`、`'\n'`。
+- 字串常數，例如 `"hello\n"`。
+- `//` 單行註解。
+- 非巢狀 `/* ... */` 區塊註解。
+- 簡單常數巨集，例如 `#define MAX_SIZE 100`。
+
+### 運算式
+
+支援 C-like 優先順序與結合性的主要運算：
+
+| 類別 | 運算子 |
+|---|---|
+| 函式呼叫與索引 | `()`、`[]` |
+| 一元運算 | `-`、`!`、`~`、`*`、`&`、`++`、`--` |
+| 乘除餘數 | `*`、`/`、`%` |
+| 加減 | `+`、`-` |
+| 位移 | `<<`、`>>` |
+| 關係運算 | `<`、`<=`、`>`、`>=` |
+| 相等運算 | `==`、`!=` |
+| 位元運算 | `&`、`^`、`|` |
+| 邏輯運算 | `&&`、`||` |
+| 指派運算 | `=`、`+=`、`-=`、`*=`、`/=`、`%=` |
+
+`&&` 與 `||` 支援短路求值。除以零、對零取餘、負數平方根、NULL 指標解參考與陣列越界會回報 runtime error。
+
+### 控制結構
+
+支援下列控制流程：
+
+```c
+if (...) { ... }
+if (...) { ... } else { ... }
+if (...) { ... } else if (...) { ... } else { ... }
+while (...) { ... }
+for (init; condition; update) { ... }
+do { ... } while (...);
+switch (...) { case 1: ... default: ... }
+break;
+continue;
+return;
+return expr;
+```
+
+`switch / case / default` 為本專案的延伸功能，支援 `break` 與 C-like fall-through。
+
+### 函式與遞迴
+
+支援函式定義、呼叫、參數傳遞、回傳值與遞迴：
+
+```c
+int fibonacci(int n) {
+    if (n == 0) return 0;
+    if (n == 1) return 1;
+    return fibonacci(n - 1) + fibonacci(n - 2);
+}
+
+int main() {
+    printf("%d\n", fibonacci(10));
+    return 0;
+}
+```
+
+完整程式以 `int main()` 或 `void main()` 作為進入點。互動模式下，未包在函式內的單行或多行 Small-C 程式碼也可以直接執行。
+
+## 內建函式
+
+| 類別 | 函式 |
+|---|---|
+| 輸入與輸出 | `putchar`、`getchar`、`printf`、`puts`、`scanf` |
+| 字串處理 | `strlen`、`strcpy`、`strcmp`、`strcat` |
+| 數學函式 | `abs`、`max`、`min`、`pow`、`sqrt`、`mod`、`rand`、`srand` |
+| 記憶體與工具 | `memset`、`sizeof_int`、`sizeof_char`、`atoi`、`itoa`、`exit` |
+
+`printf` 支援 `%d`、`%c`、`%s`、`%x`、`%%`。`scanf` 支援 `%d` 與 `%c`，引數需為指標。
+
+## 專案架構
+
+### 核心模組
+
+| 檔案 | 說明 |
+|---|---|
+| `lexer.py` | 詞法分析器，負責 token 產生、註解處理、字串與字元常數解析、簡單 macro 展開。 |
+| `parser.py` | 語法分析器與 AST 節點定義，負責建立宣告、運算式、控制流程、函式與 `switch/case` 結構。 |
+| `interpreter.py` | AST 執行核心與 semantic checker，負責運算式求值、控制流程、函式呼叫、內建函式分派與錯誤檢查。 |
+| `memory.py` | 虛擬記憶體，使用 `bytearray` 模擬位址、陣列、指標、字串與型別化讀寫。 |
+| `symtable.py` | 符號表，管理變數、陣列、指標、函式與 scope stack。 |
+| `builtins.py` | 內建函式輔助實作。 |
+| `extra_c_type.py` | 額外 C-like 型別包裝，例如 `int_ptr`、`char_ptr`、`array`。 |
+
+### 使用者介面
+
+| 檔案 | 說明 |
+|---|---|
+| `main.py` | CLI REPL 進入點，包含主迴圈、環境指令分派、即時輸入、`RUN` 與 `CHECK` 流程。 |
+| `repl.py` | REPL 輔助功能，實作 buffer 編輯、檔案存取、說明文字與終端工具。 |
+| `main_tui.py` | Textual TUI 前端，提供編輯器、輸出區、指令操作與語法上色。 |
+
+### 文件與測試
+
+| 路徑 | 說明 |
+|---|---|
+| `README.md` | 專案使用說明、功能清單、架構與測試方式。 |
+| `memory.md` / `memory_api.md` | 虛擬記憶體設計與 API 說明。 |
+| `symtable.md` / `symtable_api.md` | 符號表設計與 API 說明。 |
+| `tests/` | pytest regression tests、範例 `.sc` 程式與 acceptance-style 測試資料。 |
+| `tests/small_c_test_suite/` | 17 組 `.sc` 與 `.expected` 測試。 |
+
+## 測試方式
+
+### Pytest Regression Tests
+
+執行完整 regression tests：
+
+```bash
+python -m pytest
+```
+
+也可以分組執行：
+
+```bash
+python -m pytest tests/test_interpreter.py -q
+python -m pytest tests/test_lexer.py tests/test_repl_buffer.py tests/test_repl_main.py -q
+python -m pytest tests/test_check_semantics.py -q
+python -m pytest tests/test_tui_frontend.py -q
+```
+
+### Small-C Acceptance Test Suite
+
+`tests/small_c_test_suite/` 包含 17 組 `.sc` 與 `.expected`，涵蓋下列功能：
+
+| 類別 | 測試檔 |
+|---|---|
+| 基本算術與變數 | `01_arithmetic_precedence.sc`、`02_variables_compound.sc`、`16_prefix_postfix_increment.sc`、`17_lvalue_increment_array_pointer.sc` |
+| 控制結構 | `03_control_if_for_while.sc`、`04_control_do_break_continue.sc` |
+| 函式與遞迴 | `05_functions_calls.sc`、`06_recursion_factorial.sc` |
+| 陣列與指標 | `07_arrays_strings.sc`、`08_pointers_swap.sc` |
+| switch/case 延伸功能 | `09_switch_case.sc`、`10_switch_fallthrough.sc` |
+| 錯誤處理 | `11_error_syntax_missing_semicolon.sc`、`12_error_runtime_division_by_zero.sc`、`13_error_pointer_null_deref.sc`、`14_error_pointer_out_of_bounds.sc`、`15_error_array_out_of_bounds.sc` |
+
+可在 REPL 中手動載入測試：
 
 ```text
-tests/
-  01_arithmetic.sc
-  01_arithmetic.expected
-  02_logic.sc
-  02_logic.expected
-  03_bitwise.sc
-  03_bitwise.expected
-  04_variables.sc
-  04_variables.expected
-  05_builtins.sc
-  05_builtins.expected
-  06_control.sc
-  06_control.expected
-  07_loops.sc
-  07_loops.expected
-  08_array_pointer.sc
-  08_array_pointer.expected
-  09_recursion.sc
-  09_recursion.expected
-  10_errors.sc
-  10_errors.expected
+sc> LOAD tests/small_c_test_suite/01_arithmetic_precedence.sc
+sc> CHECK
+sc> RUN
 ```
 
-## 已知限制
+`.expected` 檔案記錄對應的預期輸出或預期錯誤訊息。
 
-- `CHECK` 目前主要檢查詞法與語法，尚未完整檢查未定義符號、型別、return、`break` / `continue` 位置等語意錯誤。
-- `scanf` 目前只支援 `%d` / `%c`，不支援 `%s`，且不保留跨次呼叫未消耗輸入。
-- `exit(int code)` 尚未實作。
-- 目前沒有 `.sc/.expected` 自動化驗收測試器。
-- `INSERT` 目前會移除前導空白，縮排保留仍待修正；`APPEND` 與 `EDIT` 已保留縮排。
-- 啟動時尚未顯示完整歡迎訊息、版本資訊與說明文字。
-- 錯誤訊息雖然多處已有處理，但仍需完整測試以避免 Python traceback 洩漏。
+## 支援範圍說明
 
-## 後續開發 TODO
+本專案實作的是課程指定的 Small-C 子集與部分延伸功能，不是完整 C compiler。以下內容不在支援範圍內：
 
-| 優先度 | 項目 |
-|---|---|
-| P0 | 補完整 `CHECK` semantic checker。 |
-| P1 | 實作 `exit(int code)`。 |
-| P1 | 修正 `INSERT` 提示格式與縮排保留；視需求調整 `APPEND` 行號提示。 |
-| P1 | 建立 `.sc/.expected` 驗收測試資料與 runner。 |
-| P2 | 補完整專題報告與驗收清單。 |
+- `float`、`double`、`long`、`short`、`unsigned`。
+- `struct`、`union`、`enum`、`typedef`。
+- `#include`、條件編譯與函式型 macro。
+- 多維陣列與 variable-length array。
+- `scanf("%s", ...)` 與完整 C 標準函式庫。
+- 完整 C compiler 等級的型別系統與最佳化。
 
 ## 授權
 
