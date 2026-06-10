@@ -77,6 +77,26 @@ SMALL_C_HIGHLIGHT_QUERY = r"""
 """
 
 
+WELCOME_MESSAGE = "Welcome to the Triple Mega Small-C Interpreter"
+
+WELCOME_ART = r"""
+
+████████╗██████╗ ██╗██████╗ ██╗     ███████╗
+╚══██╔══╝██╔══██╗██║██╔══██╗██║     ██╔════╝
+   ██║   ██████╔╝██║██████╔╝██║     █████╗
+   ██║   ██╔══██╗██║██╔═══╝ ██║     ██╔══╝
+   ██║   ██║  ██║██║██║     ███████╗███████╗
+   ╚═╝   ╚═╝  ╚═╝╚═╝╚═╝     ╚══════╝╚══════╝
+
+███╗   ███╗███████╗ ██████╗  █████╗
+████╗ ████║██╔════╝██╔════╝ ██╔══██╗
+██╔████╔██║█████╗  ██║  ███╗███████║
+██║╚██╔╝██║██╔══╝  ██║   ██║██╔══██║
+██║ ╚═╝ ██║███████╗╚██████╔╝██║  ██║
+╚═╝     ╚═╝╚══════╝ ╚═════╝ ╚═╝  ╚═╝
+"""
+
+
 def create_smallc_editor() -> TextArea:
     editor = TextArea.code_editor(
         "",
@@ -217,7 +237,7 @@ class TripleMega(App):
         yield Footer()
 
     def on_mount(self) -> None:
-        self.output.write("[bold #b8d7ff]Triple Mega Small-C Interactive Interpreter TUI[/]")
+        self.write_welcome_output()
         self.output.write("Type HELP for commands. Enter Small-C single lines at sc>; they are not added to BUFFER.")
         self.apply_pane_ratio()
         self.update_status()
@@ -297,6 +317,13 @@ class TripleMega(App):
 
     def report_exception(self, exc: Exception) -> None:
         self.write_output(str(exc), "bold red")
+
+    def write_welcome_output(self) -> None:
+        border = "═" * (len(WELCOME_MESSAGE) + 4)
+        self.output.write(f"[#d97757]╔{border}╗[/]")
+        self.output.write(f"[#d97757]║[/]  [bold white]{WELCOME_MESSAGE}[/]  [#d97757]║[/]")
+        self.output.write(f"[#d97757]╚{border}╝[/]")
+        self.output.write(WELCOME_ART)
 
     def on_mouse_down(self, event: events.MouseDown) -> None:
         if event.widget is self.splitter:
