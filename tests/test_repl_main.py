@@ -239,6 +239,41 @@ class TestRunCommand:
 
         assert "Error: main function not found." in out
 
+    def test_run_main_synthetic_call_uses_main_definition_line_for_argument_error(self, capsys):
+        buffer = [
+            "int helper() {",
+            "    return 1;",
+            "}",
+            "int main(int argc) {",
+            "    return argc;",
+            "}",
+        ]
+
+        with pytest.raises(Exception) as exc:
+            main.run_program_buffer(buffer, {}, False)
+
+        message = str(exc.value)
+        assert "Function 'main' expects 1 arguments, got 0" in message
+        assert "line 4" in message
+        assert "line 0" not in message
+
+    def test_run_main_synthetic_call_uses_main_definition_line_for_missing_return(self):
+        buffer = [
+            "int helper() {",
+            "    return 1;",
+            "}",
+            "int main() {",
+            "}",
+        ]
+
+        with pytest.raises(Exception) as exc:
+            main.run_program_buffer(buffer, {}, False)
+
+        message = str(exc.value)
+        assert "Function 'main' ended without returning int" in message
+        assert "line 4" in message
+        assert "line 0" not in message
+
     def test_run_without_main_does_not_execute_top_level_statement(self, monkeypatch, capsys):
         out = self.run_repl(monkeypatch, capsys, [
             "APPEND",
