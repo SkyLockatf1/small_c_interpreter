@@ -48,10 +48,13 @@ def printf(vm: VirtualMemory, fmt: char_ptr, *args) -> None:
             elif specifier == 'd':
                 if arg_index >= len(args):
                     raise Exception("Runtime error: printf argument missing")
-                if type(args[arg_index]) is int:
-                    result += str(args[arg_index])
+                value = args[arg_index]
+                if type(value) is int:
+                    result += str(value)
+                elif type(value) is int_ptr:
+                    result += str(value.addr)
                 else:
-                    got_type = type_mapping.get(type(args[arg_index]).__name__, type(args[arg_index]).__name__)
+                    got_type = type_mapping.get(type(value).__name__, type(value).__name__)
                     raise Exception(f"Runtime error: printf expects int for %d, got {got_type}")
                 arg_index += 1
                 i += 2
