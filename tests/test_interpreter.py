@@ -295,6 +295,24 @@ class TestInterpreterControlFlow:
         _run_code(fresh_interp, code)
         assert _get_int(fresh_interp, "sum") == 15
 
+    def test_for_init_declaration_is_scoped_to_loop(self, fresh_interp):
+        code = "int sum = 0;\nfor (int i = 0; i < 3; i = i + 1) { sum = sum + i; }"
+        _run_code(fresh_interp, code)
+        assert _get_int(fresh_interp, "sum") == 3
+
+        with pytest.raises(Exception, match="Undefined variable 'i'"):
+            _run_code(fresh_interp, "i = 10;")
+
+    def test_for_init_declaration_can_shadow_outer_variable(self, fresh_interp):
+        code = (
+            "int i = 99;\n"
+            "int sum = 0;\n"
+            "for (int i = 0; i < 3; i = i + 1) { sum = sum + i; }"
+        )
+        _run_code(fresh_interp, code)
+        assert _get_int(fresh_interp, "sum") == 3
+        assert _get_int(fresh_interp, "i") == 99
+
     def test_do_while_executes_at_least_once(self, fresh_interp):
         _run_code(fresh_interp, "int x = 0;\ndo { x = x + 1; } while (0);")
         assert _get_int(fresh_interp, "x") == 1
@@ -428,6 +446,24 @@ class TestInterpreterControlFlow:
         )
         _run_code(fresh_interp, code)
         assert _get_int(fresh_interp, "result") == 20
+
+    def test_switch_case_declaration_is_scoped_to_switch(self, fresh_interp):
+        code = (
+            "int n = 1;\n"
+            "int result = 0;\n"
+            "switch (n) {\n"
+            "    case 1:\n"
+            "        ;\n"
+            "        int local = 7;\n"
+            "        result = local;\n"
+            "        break;\n"
+            "}"
+        )
+        _run_code(fresh_interp, code)
+        assert _get_int(fresh_interp, "result") == 7
+
+        with pytest.raises(Exception, match="Undefined variable 'local'"):
+            _run_code(fresh_interp, "local = 3;")
 
     def test_switch_default_executes_when_no_case_matches(self, fresh_interp):
         code = (
@@ -621,6 +657,28 @@ class TestInterpreterFunctions:
         _run_code(fresh_interp, "void double_it(int n) { n = n * 2; }")
         _run_code(fresh_interp, "double_it(val);")
         assert _get_int(fresh_interp, "val") == 5
+
+    def test_function_body_local_cannot_redeclare_parameter(self, fresh_interp):
+        _run_code(fresh_interp, "int bad(int x) { int x = 10; return x; }")
+
+        with pytest.raises(Exception, match="Variable 'x' is already defined"):
+            _run_code(fresh_interp, "int result = bad(3);")
+
+    def test_nested_block_can_shadow_parameter_temporarily(self, fresh_interp):
+        code = (
+            "int shadow(int x) {\n"
+            "    int y = 0;\n"
+            "    {\n"
+            "        int x = 10;\n"
+            "        y = x;\n"
+            "    }\n"
+            "    return y * 100 + x;\n"
+            "}"
+        )
+        _run_code(fresh_interp, code)
+        _run_code(fresh_interp, "int result = shadow(3);")
+
+        assert _get_int(fresh_interp, "result") == 1003
 
     def test_multiple_functions_defined(self, fresh_interp, capsys):
         _run_code(fresh_interp, 'void say_hello() { printf("hello"); }')
@@ -1523,6 +1581,35 @@ class TestInterpreterErrors:
         with pytest.raises(Exception) as exc:
             _run_code(fresh_interp, code)
         assert "Expected 'case' or 'default'" in str(exc.value)
+
+    @pytest.mark.parametrize(
+        "code",
+        [
+            "int x = 1; if (x) int y = 1;",
+            "int x = 0; if (x) x = 1; else int y = 1;",
+            "int x = 0; while (x) int y = 1;",
+            "int x = 0; do int y = 1; while (x);",
+            "for (int i = 0; i < 1; i = i + 1) int y = 1;",
+        ],
+    )
+    def test_control_statement_body_rejects_direct_declaration(self, fresh_interp, code):
+        with pytest.raises(Exception) as exc:
+            _run_code(fresh_interp, code)
+        assert "control statement body" in str(exc.value)
+        assert "inside a block" in str(exc.value)
+
+    @pytest.mark.parametrize(
+        "code",
+        [
+            "int n = 1; switch (n) { case 1: int y = 1; }",
+            "int n = 1; switch (n) { default: int y = 1; }",
+        ],
+    )
+    def test_switch_label_rejects_direct_declaration(self, fresh_interp, code):
+        with pytest.raises(Exception) as exc:
+            _run_code(fresh_interp, code)
+        assert "directly after case/default" in str(exc.value)
+        assert "inside a block" in str(exc.value)
 
     def test_switch_expression_non_int_raises(self, fresh_interp):
         with pytest.raises(Exception) as exc:

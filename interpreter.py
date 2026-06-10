@@ -309,8 +309,11 @@ class Interpreter:
                 self.write_lvalue(addr, param_type, arg_value, line)
 
             try:
-                # 執行函式 body；return 會以 ReturnSignal 方式跳出巢狀 block / if / loop。
-                self.evaluate(func.body)
+                # 函式呼叫本身已經建立 function scope，參數也在同一層 scope。
+                # 因此函式最外層 body 不走 Block 分支，避免額外建立一層 scope
+                # 造成區域變數可以錯誤地遮蔽同名參數。
+                for stmt in func.body.statements:
+                    self.evaluate(stmt)
             except ReturnSignal as signal:
                 # 非 void 函式要檢查 return value 是否符合宣告回傳型別；void 函式則不可回傳值。
                 return self.validate_return_value(function_name, func.return_type, signal.value, signal.line)
@@ -816,49 +819,65 @@ class Interpreter:
                     break
             return None
         elif isinstance(ast_node, parser.ForStmt):
-            if ast_node.init is not None:
-                self.evaluate(ast_node.init)
-            while True:
-                if ast_node.condition is not None and self.evaluate(ast_node.condition) == 0:
-                    break
-                try:
-                    self.evaluate(ast_node.body)
-                except ContinueSignal:
-                    pass
-                except BreakSignal:
-                    break
-                if ast_node.update is not None:
-                    self.evaluate(ast_node.update)
+            # for 的 init 宣告（例如 for (int i = 0; ...)）需要活到 condition、body、update
+            # 都執行完，因此 loop scope 必須包住整個 for，而不是只包 body block。
+            frame_entry_top = self.memory.stack_top
+            self.symtable.push_scope()
+            try:
+                if ast_node.init is not None:
+                    self.evaluate(ast_node.init)
+                while True:
+                    if ast_node.condition is not None and self.evaluate(ast_node.condition) == 0:
+                        break
+                    try:
+                        self.evaluate(ast_node.body)
+                    except ContinueSignal:
+                        pass
+                    except BreakSignal:
+                        break
+                    if ast_node.update is not None:
+                        self.evaluate(ast_node.update)
+            finally:
+                self.symtable.pop_scope()
+                self.memory.free_stack_frame(frame_entry_top)
             return None
         elif isinstance(ast_node, parser.SwitchStmt):
             switch_value = self.evaluate(ast_node.expr)
             if not isinstance(switch_value, int):
                 raise Exception(f"Runtime error: switch expression must be int at line {ast_node.line}.")
 
-            # C-like switch：先找到第一個符合的 case；沒有符合時才跳到 default。
-            # 從命中的 clause 開始一路執行後續 clause，直到 break 或 switch 結尾，藉此保留 fall-through 行為。
-            start_index = None
-            default_index = None
-            for index, clause in enumerate(ast_node.clauses):
-                if clause.is_default:
-                    # parser 已保證 default 最多一個；這裡只記錄無 case 命中時的備援入口。
-                    default_index = index
-                elif clause.value == switch_value and start_index is None:
-                    start_index = index
-
-            if start_index is None:
-                start_index = default_index
-            if start_index is None:
-                return None
-
+            # switch 的 case/default 共享同一個 switch block scope；case 內宣告的變數
+            # 離開 switch 後必須消失，但 fall-through 期間仍維持可見。
+            frame_entry_top = self.memory.stack_top
+            self.symtable.push_scope()
             try:
-                # 只攔截 break：continue 必須穿透到外層 loop，return 必須穿透到外層函式呼叫。
-                for clause in ast_node.clauses[start_index:]:
-                    for stmt in clause.statements:
-                        self.evaluate(stmt)
-            except BreakSignal:
-                # break 結束最近一層 switch；continue/return 不在這裡攔截，交給外層 loop/function。
-                return None
+                # C-like switch：先找到第一個符合的 case；沒有符合時才跳到 default。
+                # 從命中的 clause 開始一路執行後續 clause，直到 break 或 switch 結尾，藉此保留 fall-through 行為。
+                start_index = None
+                default_index = None
+                for index, clause in enumerate(ast_node.clauses):
+                    if clause.is_default:
+                        # parser 已保證 default 最多一個；這裡只記錄無 case 命中時的備援入口。
+                        default_index = index
+                    elif clause.value == switch_value and start_index is None:
+                        start_index = index
+
+                if start_index is None:
+                    start_index = default_index
+                if start_index is None:
+                    return None
+
+                try:
+                    # 只攔截 break：continue 必須穿透到外層 loop，return 必須穿透到外層函式呼叫。
+                    for clause in ast_node.clauses[start_index:]:
+                        for stmt in clause.statements:
+                            self.evaluate(stmt)
+                except BreakSignal:
+                    # break 結束最近一層 switch；continue/return 不在這裡攔截，交給外層 loop/function。
+                    return None
+            finally:
+                self.symtable.pop_scope()
+                self.memory.free_stack_frame(frame_entry_top)
             return None
         elif isinstance(ast_node, parser.BreakStmt):
             # 交給外層最近的迴圈或 switch 處理。
@@ -871,9 +890,17 @@ class Interpreter:
             value = None if ast_node.expr is None else self.evaluate(ast_node.expr)
             raise ReturnSignal(value, ast_node.line)
         elif isinstance(ast_node, parser.Block):
-            # 區塊按順序執行其中每一個語句。
-            for stmt in ast_node.statements:
-                self.evaluate(stmt)
+            # 一般 { ... } block 會建立自己的區域 scope。
+            # return / break / continue 以 exception signal 傳出時，finally 仍會清理
+            # 這個 block 配置的區域變數，避免污染外層 scope 或後續 REPL 狀態。
+            frame_entry_top = self.memory.stack_top
+            self.symtable.push_scope()
+            try:
+                for stmt in ast_node.statements:
+                    self.evaluate(stmt)
+            finally:
+                self.symtable.pop_scope()
+                self.memory.free_stack_frame(frame_entry_top)
             return None
         else:
             raise Exception(f"Runtime error: Unsupported AST node type {type(ast_node).__name__} at line {ast_node.line}.")

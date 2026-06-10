@@ -349,6 +349,15 @@ class parser:
             and paren_token.value == "("
         )
 
+    def is_declaration_start(self):
+        """判斷目前 token 是否是變數宣告可能的開頭。"""
+        token = self.current_token
+        return (
+            token is not None
+            and token.type == lexer.token_type.keyword
+            and token.value in ["int", "char", "void"]
+        )
+
     def parse_type_spec(self, allow_void=False, context="type"):
         """解析型別名稱，並支援 int* / char*。
 
@@ -949,6 +958,8 @@ class parser:
             and not self.check("default", lexer.token_type.keyword)
             and not self.check("}", lexer.token_type.punctuator)
         ):
+            if not statements and self.is_declaration_start():
+                self.error("Variable declaration directly after case/default label must be inside a block; use '{ ... }'")
             statements.append(self.parse_statement())
         return statements
 
@@ -1074,5 +1085,6 @@ class parser:
             self.error("Expected statement")
         if self.check("{", lexer.token_type.punctuator):
             return self.parse_block()
-        else:
-            return self.parse_statement()
+        if self.is_declaration_start():
+            self.error("Variable declaration in a control statement body must be inside a block; use '{ ... }'")
+        return self.parse_statement()
