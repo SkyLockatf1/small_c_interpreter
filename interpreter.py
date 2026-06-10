@@ -112,10 +112,23 @@ BUILTIN_PARAM_TYPES = {
 
 
 class SemanticError(Exception):
+    """語意分析發現錯誤時拋出；訊息已彙整所有行號與說明，方便一次顯示全部問題。"""
     pass
 
 
 class SemanticChecker:
+    """
+    靜態語意分析器，在程式執行前對 AST 做型別與作用域檢查。
+
+    主要職責：
+    - 確認變數、函式在使用前已宣告
+    - 驗證型別相容性（指定、函式呼叫、return）
+    - 確認 break/continue 只出現在迴圈內、return 只出現在函式內
+    - 確認非 void 函式的每條執行路徑都有 return
+
+    錯誤以 self.errors 累積，最後一次性拋出 SemanticError，
+    讓使用者能一次看到全部問題，而非遇到第一個就停止。
+    """
     def __init__(self):
         self.errors = []
         self.scopes = [{}]
@@ -205,7 +218,7 @@ class SemanticChecker:
                 if len(main_fn.params) != 0:
                     self.error(main_fn.line, "main function must not have parameters.")
         if self.errors:
-            raise SemanticError("\n".join(self.errors) + f"\n{len(self.errors)} error(s) found.")
+            raise SemanticError("Semantic Error:\n" + "\n".join(self.errors) + f"\n{len(self.errors)} error(s) found.")
 
     def collect_function_signatures(self, program):
         for node in program:
@@ -236,6 +249,7 @@ class SemanticChecker:
             self.current_function = None
 
     def check_block(self, block):
+        """檢查 { } 區塊：建立新 scope，回傳是否保證每條執行路徑都有 return。"""
         self.push_scope()
         guaranteed_return = False
         for stmt in block.statements:
@@ -247,6 +261,10 @@ class SemanticChecker:
         return guaranteed_return
 
     def check_statement_sequence_returns(self, statements):
+        """
+        檢查 switch case 內的語句序列是否保證 return。
+        遇到 break 視為此路徑不保證 return（break 跳出 switch，不等同於 return）。
+        """
         guaranteed_return = False
         for stmt in statements:
             if guaranteed_return:
@@ -341,6 +359,7 @@ class SemanticChecker:
         return False
 
     def check_var_decl(self, node):
+        """檢查變數宣告的型別合法性與初始值型別相容性，並登錄到目前 scope。"""
         if node.is_array:
             if node.var_type not in ("int", "char"):
                 self.error(node.line, f"array element type {node.var_type} is not supported.")
@@ -369,6 +388,7 @@ class SemanticChecker:
         self.define_var(node.name, node.var_type, node.line)
 
     def check_return(self, node):
+        """驗證 return 語句的回傳型別是否符合目前函式的宣告型別。"""
         if self.current_function is None:
             self.error(node.line, "return statement is only allowed inside a function.")
             return
@@ -384,6 +404,10 @@ class SemanticChecker:
         self.check_assignable(expected, value_type, node.line, f"return from '{self.current_function.name}'")
 
     def lvalue_type(self, expr):
+        """
+        推導可寫入左值的靜態型別，只接受 Identifier、arr[i]、*p 三種形式。
+        回傳的是元素型別（例如 char[] 的 arr[i] 回傳 "char"，不是 "char[]"）。
+        """
         if isinstance(expr, parser.Identifier):
             symbol = self.lookup_var(expr.name, expr.line)
             if symbol["is_array"]:
@@ -415,6 +439,10 @@ class SemanticChecker:
         return "int"
 
     def expr_type(self, expr):
+        """
+        推導任意 expression 的靜態型別。
+        遇到型別錯誤只記錄到 self.errors，仍回傳合理的預設型別，使分析能繼續進行。
+        """
         if isinstance(expr, parser.Number):
             return "int"
         if isinstance(expr, parser.Char):
@@ -471,6 +499,7 @@ class SemanticChecker:
         return "int"
 
     def unary_type(self, expr):
+        """推導一元運算的結果型別，並驗證運算元型別是否合法。"""
         operand_type = self.expr_type(expr.operand)
         if expr.operator in ("+", "-", "!", "~"):
             if operand_type not in NUMERIC_TYPES:
@@ -508,6 +537,7 @@ class SemanticChecker:
         return "int"
 
     def binary_type(self, expr):
+        """推導二元運算的結果型別，並驗證左右運算元型別組合是否合法。"""
         left_type = self.expr_type(expr.left)
         right_type = self.expr_type(expr.right)
         if expr.operator in ("&&", "||"):
@@ -544,6 +574,7 @@ class SemanticChecker:
         return "int"
 
     def call_type(self, expr):
+        """驗證函式呼叫的參數數量與型別，回傳函式宣告的回傳型別。"""
         if not isinstance(expr.fn, parser.Identifier):
             self.error(expr.line, "function name must be an identifier.")
             return "int"
@@ -576,14 +607,17 @@ class SemanticChecker:
 
 
 def check_semantics(program):
+    """對 AST 執行完整的靜態語意分析；發現任何錯誤時拋出 SemanticError（含彙整訊息）。"""
     SemanticChecker().check(program)
 
 # break / continue 可能出現在巢狀 block 或 if 裡，
 # 用內部 signal 往外傳遞，直到最近的迴圈節點接住。
 class BreakSignal(Exception):
+    """break 語句觸發的控制流程訊號，由最近的迴圈或 switch 的 except 區塊攔截。"""
     pass
 
 class ContinueSignal(Exception):
+    """continue 語句觸發的控制流程訊號，由最近的迴圈的 except 區塊攔截以跳到下一輪。"""
     pass
 
 class ExitSignal(Exception):
@@ -755,7 +789,15 @@ class Interpreter:
         raise Exception(f"Runtime error: Unsupported lvalue type {value_type} at line {line}.")
 
     def apply_increment_decrement(self, operand, operator: str, postfix: bool, line: int):
-        """執行 ++/--，前綴回傳新值、後綴回傳舊值。"""
+        """
+        執行 ++/-- 運算，統一支援 Identifier、arr[i]、*p 三種左值形式。
+
+        Args:
+            operand: 被操作的左值 AST 節點。
+            operator: "++" 或 "--"。
+            postfix: True 為後置（x++，回傳舊值）；False 為前置（++x，回傳新值）。
+            line: 行號，用於錯誤訊息。
+        """
         addr, value_type = self.resolve_lvalue(operand)
         old_val = self.read_lvalue(addr, value_type)
         delta = 1 if operator == "++" else -1
