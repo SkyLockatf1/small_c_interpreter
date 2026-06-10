@@ -378,16 +378,14 @@ System Software Final Project , Spring 2026
                             print(f"{var_type} {name} = <unsupported>")
             
             
-            # 2. 如果不是環境指令，才視為 Small-C 程式碼執行
+            # 2. 如果不是環境指令，才視為 Small-C 程式碼立即執行。
+            #    即時輸入不寫入程式緩衝區；buffer 只由 LOAD/APPEND/INSERT/EDIT/DELETE 管理。
             else:
-                line_start = len(buffer) + 1  # 本次輸入在 buffer 的起始行號
-                pending_buffer = raw_input + "\n" # 先把第一行程式碼存進 buffer，後續如果不完整再繼續讀取
-                buffer.append(raw_input) # 只有程式碼才存進 buffer (依規範而定)
-                is_dirty = True  # 輸入程式碼後標記為已修改
+                line_start = 1
+                pending_buffer = raw_input + "\n"
                 while not check_input_complete(pending_buffer):
                     next_line = input(">>> ").strip()
                     pending_buffer += next_line + "\n"
-                    buffer.append(next_line)
                 # 執行 Lexer, Parser...
                 program = analyze_program(pending_buffer, macro_definitions, line_start=line_start)
                 for ast in program:

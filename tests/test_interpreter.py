@@ -800,6 +800,12 @@ class TestInterpreterPrintf:
         out = _filter_debug(capsys.readouterr().out)
         assert out.strip() == "-5"
 
+    def test_printf_d_accepts_int_pointer_address(self, fresh_interp, capsys):
+        _run_code(fresh_interp, 'int x = 42;\nint* ptr = &x;\nprintf("%d", ptr);')
+        out = _filter_debug(capsys.readouterr().out)
+        sym_x = fresh_interp.symtable.lookup_var("x")
+        assert out.strip() == str(sym_x.addr)
+
     def test_printf_s_char_array(self, fresh_interp, capsys):
         _run_code(fresh_interp, 'char msg[6] = "hello";\nprintf("%s", msg);')
         out = _filter_debug(capsys.readouterr().out)

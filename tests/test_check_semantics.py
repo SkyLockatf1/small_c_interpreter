@@ -257,3 +257,33 @@ def test_check_keeps_switch_with_break_conservative(capsys):
     )
 
     assert "function 'main' may end without returning int." in out
+
+
+def test_check_accepts_deref_array_as_lvalue(capsys):
+    out = run_check(
+        """
+        int main() {
+            int arr[3];
+            *arr = 10;
+            return *arr;
+        }
+        """,
+        capsys,
+    )
+
+    assert "No errors found." in out
+
+
+def test_check_accepts_deref_char_array_as_lvalue(capsys):
+    out = run_check(
+        """
+        int main() {
+            char buf[8];
+            *buf = 'A';
+            return 0;
+        }
+        """,
+        capsys,
+    )
+
+    assert "No errors found." in out

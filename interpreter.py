@@ -404,7 +404,7 @@ class SemanticChecker:
             self.error(expr.line, f"cannot apply index operator to {base_type}.")
             return "int"
         if isinstance(expr, parser.UnaryExpr) and expr.operator == "*":
-            ptr_type = self.expr_type(expr.operand)
+            ptr_type = self.decay(self.expr_type(expr.operand))
             if ptr_type == "int*":
                 return "int"
             if ptr_type == "char*":
@@ -699,6 +699,11 @@ class Interpreter:
             if isinstance(ptr, char_ptr):
                 self.memory.check_ptr(ptr.addr, 1)
                 return ptr.addr, "char"
+            if isinstance(ptr, array):
+                # 支援 *arr = val 語法：陣列 decay 成指標後解引用，等同 arr[0] = val
+                element_size = symtable.sizeof_type(ptr.elem_type)
+                self.memory.check_bounds(ptr.addr, ptr.addr, element_size)
+                return ptr.addr, ptr.elem_type
             raise Exception(f"Runtime error: Cannot apply unary '*' to non-pointer expression at line {expr.line}.")
 
         raise Exception(f"Runtime error: Left side of assignment must be a modifiable lvalue at line {expr.line}.")
@@ -928,6 +933,14 @@ class Interpreter:
                     raise Exception(f"Runtime error: Cannot apply unary '&' to non-variable at line {ast_node.line}.")
             elif ast_node.operator == "*":
                 ptr = self.evaluate(ast_node.operand)
+                if isinstance(ptr, array):
+                    # 支援 val = *arr 語法：陣列 decay 成指標後解引用，等同 val = arr[0]
+                    element_size = symtable.sizeof_type(ptr.elem_type)
+                    self.memory.check_bounds(ptr.addr, ptr.addr, element_size)
+                    if ptr.elem_type == "int":
+                        return self.memory.get_int(ptr.addr)
+                    else:
+                        return self.memory.get_char(ptr.addr)
                 if not isinstance(ptr, (int_ptr, char_ptr)):
                     raise Exception(f"Runtime error: Cannot apply unary '*' to non-pointer expression at line {ast_node.line}.")
                 if isinstance(ptr, int_ptr):
