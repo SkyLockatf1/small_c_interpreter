@@ -167,10 +167,12 @@ class TestRunCommand:
 
     def test_run_basic_main_prints_and_returns_zero(self, monkeypatch, capsys):
         out = self.run_repl(monkeypatch, capsys, [
+            "APPEND",
             "int main() {",
             'printf("hello\\n");',
             "return 0;",
             "}",
+            ".",
             "RUN",
             "QUIT",
             "y",
@@ -181,9 +183,11 @@ class TestRunCommand:
 
     def test_run_uses_main_return_value(self, monkeypatch, capsys):
         out = self.run_repl(monkeypatch, capsys, [
+            "APPEND",
             "int main() {",
             "return 7;",
             "}",
+            ".",
             "RUN",
             "QUIT",
             "y",
@@ -193,12 +197,14 @@ class TestRunCommand:
 
     def test_run_exit_builtin_uses_exit_code_and_stops_execution(self, monkeypatch, capsys):
         out = self.run_repl(monkeypatch, capsys, [
+            "APPEND",
             "int main() {",
             'printf("before\\n");',
             "exit(5);",
             'printf("after\\n");',
             "return 0;",
             "}",
+            ".",
             "RUN",
             "QUIT",
             "y",
@@ -221,9 +227,11 @@ class TestRunCommand:
 
     def test_run_without_main_reports_error(self, monkeypatch, capsys):
         out = self.run_repl(monkeypatch, capsys, [
+            "APPEND",
             "int add(int a, int b) {",
             "return a + b;",
             "}",
+            ".",
             "RUN",
             "QUIT",
             "y",
@@ -264,12 +272,14 @@ class TestRunCommand:
 
     def test_run_twice_uses_fresh_runtime_each_time(self, monkeypatch, capsys):
         out = self.run_repl(monkeypatch, capsys, [
+            "APPEND",
             "int counter = 0;",
             "int main() {",
             "counter = counter + 1;",
             'printf("counter=%d\\n", counter);',
             "return counter;",
             "}",
+            ".",
             "RUN",
             "RUN",
             "QUIT",
@@ -281,9 +291,11 @@ class TestRunCommand:
 
     def test_run_void_main_uses_zero_exit_code(self, monkeypatch, capsys):
         out = self.run_repl(monkeypatch, capsys, [
+            "APPEND",
             "void main() {",
             'printf("ok\\n");',
             "}",
+            ".",
             "RUN",
             "QUIT",
             "y",
@@ -294,10 +306,12 @@ class TestRunCommand:
 
     def test_run_runtime_error_returns_to_repl_without_traceback(self, monkeypatch, capsys):
         out = self.run_repl(monkeypatch, capsys, [
+            "APPEND",
             "int main() {",
             'printf("%d\\n", 10 / 0);',
             "return 0;",
             "}",
+            ".",
             "RUN",
             "QUIT",
             "y",
@@ -309,12 +323,14 @@ class TestRunCommand:
 
     def test_trace_on_prints_main_statements_before_run_execution(self, monkeypatch, capsys):
         out = self.run_repl(monkeypatch, capsys, [
+            "APPEND",
             "int main() {",
             "int result;",
             "result = 3 + 4;",
             'printf("result=%d\\n", result);',
             "return result;",
             "}",
+            ".",
             "TRACE ON",
             "RUN",
             "QUIT",
@@ -330,6 +346,7 @@ class TestRunCommand:
 
     def test_trace_on_prints_user_function_statements(self, monkeypatch, capsys):
         out = self.run_repl(monkeypatch, capsys, [
+            "APPEND",
             "int gcd(int a, int b) {",
             "int temp;",
             "while (b != 0) {",
@@ -345,6 +362,7 @@ class TestRunCommand:
             'printf("GCD=%d\\n", result);',
             "return 0;",
             "}",
+            ".",
             "TRACE ON",
             "RUN",
             "QUIT",
@@ -359,10 +377,12 @@ class TestRunCommand:
 
     def test_trace_off_stops_printing_trace_lines(self, monkeypatch, capsys):
         out = self.run_repl(monkeypatch, capsys, [
+            "APPEND",
             "int main() {",
             'printf("ok\\n");',
             "return 0;",
             "}",
+            ".",
             "TRACE ON",
             "TRACE OFF",
             "RUN",
@@ -444,7 +464,8 @@ class TestCheckCommand:
             "int x = 1;",
             "APPEND",
             "int main() {",
-            "x = 99;",
+            "int y;",
+            "y = 99;",
             "return 0;",
             "}",
             ".",
@@ -457,6 +478,18 @@ class TestCheckCommand:
         assert "No errors found." in out
         assert "int x = 1" in out
         assert "int x = 99" not in out
+
+    def test_direct_input_does_not_write_program_buffer(self, monkeypatch, capsys):
+        out = self.run_repl(monkeypatch, capsys, [
+            "int x = 1;",
+            "LIST",
+            "VARS",
+            "QUIT",
+        ])
+
+        assert "REPL error: Program buffer is empty." in out
+        assert "int x = 1" in out
+        assert "unsaved changes" not in out
 
 
 class TestReplVarsScenario:
