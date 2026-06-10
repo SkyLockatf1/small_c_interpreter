@@ -7,15 +7,32 @@
 
 ## 專案簡介
 
-`Small-C Interpreter` 是一個以 Python 實作的 Small-C 互動式解譯器，版本為 `v3.0`。本專案作為系統軟體期末專題，整合詞法分析、語法分析、語意檢查、符號表、虛擬記憶體、AST 直譯執行、內建函式與互動式 REPL 指令，模擬一個 C-like 子集語言的完整執行流程。
+`Triple Mega Small-C Interpreter` 是一個以 Python 實作的 Small-C 互動式解譯器，版本為 `v3.0`。本專案作為系統軟體期末專題，整合詞法分析、語法分析、語意檢查、符號表、虛擬記憶體、AST 直譯執行、內建函式與互動式 REPL 指令，模擬一個 C-like 子集語言的完整執行流程。
 
 使用者可以在 REPL 中逐行輸入 Small-C 程式碼立即執行，也可以透過程式緩衝區載入、編輯、檢查、追蹤與執行完整 `.sc` 原始碼檔案。專案另外提供 Textual TUI 前端，方便以文字介面編輯與執行程式。
+
+
+## 專案特色
+
+以下列出相較於基本必做 Small-C 子集之外，本專案額外完成或強化的功能，可作為展示與報告中的加分亮點：
+
+- **`switch / case / default` 延伸語法**：支援 `switch` 控制結構、`case` 常數標籤、`default`、`break`，並保留 C-like fall-through 行為。語意檢查也會推論 `switch` 各入口是否保證 `return`。
+- **Textual TUI 前端**：除了原本 CLI REPL，另提供 `main_tui.py` 文字介面，包含左側 buffer 編輯器、右側輸出區、下方 `sc>` command bar、語法上色、F5/F6 快捷鍵，以及可拖曳調整左右寬度的 pane。
+- **簡單 `#define` 常數巨集**：lexer 階段支援簡單常數替換，例如 `#define N 8`，可在陣列大小與運算式中使用。
+- **更完整的 `printf` 格式支援**：除 `%d`、`%c`、`%s`、`%x`、`%%` 外，也支援最小欄位寬度，例如 `%2d`、`%4x`、`%8s`、`%2c`。
+- **RUN 前自動語意檢查**：`RUN` 會先執行與 `CHECK` 相同的靜態語意檢查，能抓出未執行路徑中的未定義符號、型別錯誤、return 問題與錯誤的 `break/continue` 位置，通過後才會進入 runtime。
+- **多錯誤語意回報**：semantic checker 會累積多個語意錯誤後一次列出，而不是遇到第一個錯誤就停止，方便除錯。
+- **執行期錯誤處理強化**：針對除以零、取餘零、陣列越界、NULL 指標解參考、指標位移越界、字串 buffer overflow、錯誤內建函式參數型別等情況提供明確錯誤訊息，避免直接暴露 Python traceback。
+- **指標與左值操作延伸**：支援 `arr[i]++`、`++arr[i]`、`(*p)++`、`++(*p)`、`*p++`、`*++p` 等 C-like 前後綴遞增/遞減語意，並保留前綴回傳新值、後綴回傳舊值的行為。
+- **`exit(int code)` 控制流程**：Small-C 程式可呼叫 `exit(code)` 立即停止目前程式，並回報指定 return value，但不會關閉 Python REPL/TUI 本身。
+- **完整測試集與 expected output**：提供 `tests/small_c_test_suite/`，包含算術、變數、控制結構、函式、遞迴、陣列、指標、`switch/case`、執行期錯誤與語法錯誤等 `.sc/.expected` 測資。
 
 ## 專案資訊
 
 | 項目 | 內容 |
 |---|---|
-| 專案名稱 | Small-C Interpreter |
+| 專案名稱 | Triple Mega Small-C Interpreter |
+| 作者 | 羅敬軒 陳立峰 黃立昕 |
 | 版本 | v3.0 |
 | 課程 | 系統軟體期末專題 |
 | 學期 | Spring 2026 |
@@ -257,7 +274,7 @@ int main() {
 | 數學函式 | `abs`、`max`、`min`、`pow`、`sqrt`、`mod`、`rand`、`srand` |
 | 記憶體與工具 | `memset`、`sizeof_int`、`sizeof_char`、`atoi`、`itoa`、`exit` |
 
-`printf` 支援 `%d`、`%c`、`%s`、`%x`、`%%`。`scanf` 支援 `%d` 與 `%c`，引數需為指標。
+`printf` 支援 `%d`、`%c`、`%s`、`%x`、`%%`，並支援最小欄位寬度，例如 `%2d`、`%4x`、`%8s`。`scanf` 支援 `%d` 與 `%c`，引數需為指標。
 
 ## 專案架構
 

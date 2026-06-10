@@ -239,7 +239,7 @@ class TestRunCommand:
 
         assert "Error: main function not found." in out
 
-    def test_run_main_synthetic_call_uses_main_definition_line_for_argument_error(self, capsys):
+    def test_run_main_parameter_error_uses_main_definition_line(self, capsys):
         buffer = [
             "int helper() {",
             "    return 1;",
@@ -253,11 +253,11 @@ class TestRunCommand:
             main.run_program_buffer(buffer, {}, False)
 
         message = str(exc.value)
-        assert "Function 'main' expects 1 arguments, got 0" in message
+        assert "main function must not have parameters." in message
         assert "line 4" in message
         assert "line 0" not in message
 
-    def test_run_main_synthetic_call_uses_main_definition_line_for_missing_return(self):
+    def test_run_main_missing_return_uses_main_definition_line(self):
         buffer = [
             "int helper() {",
             "    return 1;",
@@ -270,7 +270,7 @@ class TestRunCommand:
             main.run_program_buffer(buffer, {}, False)
 
         message = str(exc.value)
-        assert "Function 'main' ended without returning int" in message
+        assert "function 'main' may end without returning int." in message
         assert "line 4" in message
         assert "line 0" not in message
 
@@ -304,6 +304,26 @@ class TestRunCommand:
         assert "top level should not run" not in out
         assert "main only" in out
         assert "Program exited with return value 0." in out
+
+    def test_run_checks_unreached_semantic_error_before_execution(self, monkeypatch, capsys):
+        out = self.run_repl(monkeypatch, capsys, [
+            "APPEND",
+            "int unused() {",
+            "    return missing_symbol;",
+            "}",
+            "int main() {",
+            '    printf("should not execute\\n");',
+            "    return 0;",
+            "}",
+            ".",
+            "RUN",
+            "QUIT",
+            "y",
+        ])
+
+        assert "undefined variable 'missing_symbol'" in out
+        assert "should not execute" not in out
+        assert "Program exited with return value 0." not in out
 
     def test_run_twice_uses_fresh_runtime_each_time(self, monkeypatch, capsys):
         out = self.run_repl(monkeypatch, capsys, [

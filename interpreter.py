@@ -272,9 +272,17 @@ class SemanticChecker:
                 continue
             if isinstance(stmt, parser.BreakStmt):
                 self.check_stmt(stmt)
-                return False
+                return "break"
             guaranteed_return = self.check_stmt(stmt)
-        return guaranteed_return
+        return "return" if guaranteed_return else "fallthrough"
+
+    def switch_entry_guarantees_return(self, flows, start_index):
+        for flow in flows[start_index:]:
+            if flow == "return":
+                return True
+            if flow == "break":
+                return False
+        return False
 
     def check_stmt(self, node):
         if node is None or isinstance(node, parser.EmptyStmt):
@@ -335,15 +343,18 @@ class SemanticChecker:
             self.switch_depth += 1
             self.push_scope()
             has_default = False
-            all_clauses_return = True
+            flows = []
             for clause in node.clauses:
                 if clause.is_default:
                     has_default = True
-                if not self.check_statement_sequence_returns(clause.statements):
-                    all_clauses_return = False
+                flows.append(self.check_statement_sequence_flow(clause.statements))
+            all_entries_return = all(
+                self.switch_entry_guarantees_return(flows, index)
+                for index in range(len(flows))
+            )
             self.pop_scope()
             self.switch_depth -= 1
-            return has_default and all_clauses_return
+            return has_default and all_entries_return
         if isinstance(node, parser.BreakStmt):
             if self.loop_depth == 0 and self.switch_depth == 0:
                 self.error(node.line, "break statement is only allowed inside a loop or switch.")
