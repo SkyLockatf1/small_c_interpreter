@@ -3,6 +3,7 @@ test_interpreter.py - 測試 C 語言解譯管線
 涵蓋變數、運算子、控制流、函式、陣列、指標、printf、執行期錯誤。
 """
 import pytest
+import interpreter as interp_mod
 from test_helpers import _run_code, _get_int, _get_char, _filter_debug
 
 
@@ -1322,11 +1323,17 @@ class TestInterpreterUtilityBuiltins:
 
         assert "sizeof_char" in str(exc.value)
 
-    def test_exit_is_listed_but_not_implemented_yet(self, fresh_interp):
-        with pytest.raises(Exception) as exc:
+    def test_exit_raises_exit_signal_with_code(self, fresh_interp):
+        with pytest.raises(interp_mod.ExitSignal) as exc:
             _run_code(fresh_interp, "exit(0);")
 
-        assert "exit" in str(exc.value).lower()
+        assert exc.value.code == 0
+
+    def test_exit_rejects_non_int_code(self, fresh_interp):
+        with pytest.raises(Exception) as exc:
+            _run_code(fresh_interp, 'exit("bad");')
+
+        assert "exit expects int" in str(exc.value)
 
 
 class TestInterpreterErrors:

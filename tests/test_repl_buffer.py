@@ -244,6 +244,18 @@ class TestReplAppend:
         repl.APPEND(buffer)
         assert buffer == ["  int x;  "]
 
+    def test_append_prompts_with_next_line_numbers(self, filled_buffer, monkeypatch):
+        prompts = []
+        inputs = iter(["int new1 = 6;", "int new2 = 7;", "."])
+
+        def fake_input(prompt=""):
+            prompts.append(prompt)
+            return next(inputs)
+
+        monkeypatch.setattr("builtins.input", fake_input)
+        repl.APPEND(filled_buffer)
+        assert prompts == ["6> ", "7> ", "8> "]
+
 
 class TestReplInsert:
     """測試 repl.INSERT 的插入位置、多行順序與邊界錯誤。"""
@@ -297,6 +309,24 @@ class TestReplInsert:
         monkeypatch.setattr("builtins.input", lambda prompt="": next(inputs))
         repl.INSERT(buffer, 1)
         assert buffer == ["int x = 1;"]
+
+    def test_insert_preserves_indentation(self, filled_buffer, monkeypatch):
+        inputs = iter(["    int indented = 1;  ", "."])
+        monkeypatch.setattr("builtins.input", lambda prompt="": next(inputs))
+        repl.INSERT(filled_buffer, 2)
+        assert filled_buffer[1] == "    int indented = 1;  "
+
+    def test_insert_prompts_with_inserted_line_numbers(self, filled_buffer, monkeypatch):
+        prompts = []
+        inputs = iter(["first", "second", "."])
+
+        def fake_input(prompt=""):
+            prompts.append(prompt)
+            return next(inputs)
+
+        monkeypatch.setattr("builtins.input", fake_input)
+        repl.INSERT(filled_buffer, 3)
+        assert prompts == ["3> ", "4> ", "5> "]
 
 
 class TestReplEdit:

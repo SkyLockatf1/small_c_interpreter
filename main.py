@@ -90,7 +90,10 @@ def run_program_buffer(buffer: list[str], macro_definitions: dict[str, str], tra
     runtime.trace_source_lines = {line_number: line for line_number, line in enumerate(buffer, start=1)}
     runtime.trace_enabled = trace_enabled
     try:
-        return_value = runtime.evaluate(main_call)
+        try:
+            return_value = runtime.evaluate(main_call)
+        except interpreter.ExitSignal as signal:
+            return_value = signal.code
     finally:
         runtime.trace_source_lines = {}
     if return_value is None:
@@ -105,7 +108,8 @@ def check_program_buffer(buffer: list[str], macro_definitions: dict[str, str]) -
         return
 
     source = "\n".join(buffer) + "\n"
-    analyze_program(source, dict(macro_definitions))
+    program = analyze_program(source, dict(macro_definitions))
+    interpreter.check_semantics(program)
     print("No errors found.")
  
 def check_input_complete(pending_buffer: str) -> bool:
@@ -389,5 +393,7 @@ System Software Final Project , Spring 2026
                 for ast in program:
                     result = interpreter_instance.evaluate(ast)
 
+        except interpreter.ExitSignal as signal:
+            print(f"Program exited with return value {signal.code}.")
         except Exception as e:
             print(e)

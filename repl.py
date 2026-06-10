@@ -3,7 +3,7 @@ import os
 # 顯示系統/專案說明（待實作）
 def ABOUT():
     # 保留原本酷酷的 ASCII Art 視覺
-    print(""" 
+    print(r""" 
 ╔══════════════════════════════════════════════════════════════════════════════╗
 ║                                                                              ║
 ║  ████████╗██████╗ ██╗██████╗ ██╗     ███████╗                                ║
@@ -133,7 +133,7 @@ def APPEND(buffer:list[str]) -> bool:
     modified = False
     while True:
         # 不使用 strip()，避免把使用者輸入的程式縮排移除。
-        new_code = input("Enter code to append (or '.' to finish): ")
+        new_code = input(f"{len(buffer) + 1}> ")
         if new_code.strip() == ".": # 空行結束輸入
             break
         buffer.append(new_code)
@@ -191,8 +191,8 @@ def INSERT(buffer: list[str], arg: int) -> bool:
         raise Exception(f"REPL error: Index {arg} out of bounds. Valid range is 1 to {len(buffer)+1}")
     offset = 0
     while True:
-        insert_code = input("Enter code to insert (or '.' to finish):").strip()
-        if insert_code == ".":  # 空行結束輸入
+        insert_code = input(f"{arg + offset}> ")
+        if insert_code.strip() == ".":
             break
         # 使用 offset 保留多行插入的原始順序
         buffer.insert(arg-1+offset, insert_code)

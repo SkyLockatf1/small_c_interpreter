@@ -311,6 +311,13 @@ class parser:
             raise Exception(f"Syntax error: {message} at end of input")
         raise Exception(f"Syntax error: {message} at line {token.line}: got '{token.value}'")
 
+    def error_at_line(self, message, line):
+        """Report a syntax error at a known source line instead of the next token line."""
+        token = self.current_token
+        if token is None:
+            raise Exception(f"Syntax error: {message} at line {line}: got end of input")
+        raise Exception(f"Syntax error: {message} at line {line}: got '{token.value}'")
+
     def check(self, value, token_type=None):
         """檢查目前 token 是否符合指定 value 與可選的 token_type，但不消耗 token。"""
         token = self.current_token
@@ -332,6 +339,12 @@ class parser:
         token = self.match(value, token_type)
         if token is None:
             self.error(f"Expected token '{value}'")
+        return token
+
+    def expect_statement_semicolon(self, line, statement_name):
+        token = self.match(";", lexer.token_type.punctuator)
+        if token is None:
+            self.error_at_line(f"Expected ';' after {statement_name}", line)
         return token
 
     def match_operator(self, operators):
@@ -482,7 +495,7 @@ class parser:
         
         # C 語言中，除了特定的控制結構外，運算式語句結尾通常需要分號。
         # (例如函數呼叫 f(); 或賦值 x = 1;)
-        self.expect(";", lexer.token_type.punctuator)
+        self.expect_statement_semicolon(line, "expression statement")
         return ExpressionStmt(expr, line)
 
     def parse(self):
@@ -665,7 +678,7 @@ class parser:
                 # int a[] = {1, 2, 3} 直接由初始化列表長度推導大小。
                 array_size = len(init_expr.values)
 
-        self.expect(";", lexer.token_type.punctuator)
+        self.expect_statement_semicolon(line, "variable declaration")
         return VarDecl(var_type, name, init_expr, line, is_array, array_size)
 
     def parse_init_list(self):
@@ -876,7 +889,7 @@ class parser:
         self.expect("(", lexer.token_type.punctuator)
         condition = self.parse_expression()
         self.expect(")", lexer.token_type.punctuator)
-        self.expect(";", lexer.token_type.punctuator)
+        self.expect_statement_semicolon(do_token.line, "do-while statement")
         return DoWhileStmt(body, condition, do_token.line)
 
     def parse_for_statement(self):
@@ -1076,7 +1089,7 @@ class parser:
         if self.loop_depth == 0 and self.switch_depth == 0:
             self.error("'break' statement is only allowed inside a loop or switch")
         token = self.advance() # 吃掉 'break'
-        self.expect(";", lexer.token_type.punctuator)
+        self.expect_statement_semicolon(token.line, "break statement")
         return BreakStmt(token.line)
 
     def parse_continue_statement(self):
@@ -1084,7 +1097,7 @@ class parser:
         if self.loop_depth == 0:
             self.error("'continue' statement is only allowed inside a loop")
         token = self.advance() # 吃掉 'continue'
-        self.expect(";", lexer.token_type.punctuator)
+        self.expect_statement_semicolon(token.line, "continue statement")
         return ContinueStmt(token.line)
 
     def parse_return_statement(self):
@@ -1096,7 +1109,7 @@ class parser:
         expr = None
         if not self.check(";", lexer.token_type.punctuator):
             expr = self.parse_expression()
-        self.expect(";", lexer.token_type.punctuator)
+        self.expect_statement_semicolon(token.line, "return statement")
         return ReturnStmt(expr, token.line)
 
     def parse_statement_or_block(self):

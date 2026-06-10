@@ -191,6 +191,34 @@ class TestRunCommand:
 
         assert "Program exited with return value 7." in out
 
+    def test_run_exit_builtin_uses_exit_code_and_stops_execution(self, monkeypatch, capsys):
+        out = self.run_repl(monkeypatch, capsys, [
+            "int main() {",
+            'printf("before\\n");',
+            "exit(5);",
+            'printf("after\\n");',
+            "return 0;",
+            "}",
+            "RUN",
+            "QUIT",
+            "y",
+        ])
+
+        assert "before" in out
+        assert "after" not in out
+        assert "Program exited with return value 5." in out
+
+    def test_direct_exit_builtin_returns_to_repl(self, monkeypatch, capsys):
+        out = self.run_repl(monkeypatch, capsys, [
+            "exit(3);",
+            "VARS",
+            "QUIT",
+            "y",
+        ])
+
+        assert "Program exited with return value 3." in out
+        assert "No variables defined." in out
+
     def test_run_without_main_reports_error(self, monkeypatch, capsys):
         out = self.run_repl(monkeypatch, capsys, [
             "int add(int a, int b) {",

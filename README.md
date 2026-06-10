@@ -197,6 +197,7 @@ sc> EXIT
 ```bash
 python -m pytest tests/test_interpreter.py -q
 python -m pytest tests/test_lexer.py tests/test_repl_buffer.py tests/test_repl_main.py -q
+python -m pytest tests/test_check_semantics.py -q
 ```
 
 也可以執行完整測試：
@@ -232,10 +233,10 @@ sc> VARS
 
 ```text
 sc> APPEND
-Enter code to append (or '.' to finish): int main() {
-Enter code to append (or '.' to finish):     return 0;
-Enter code to append (or '.' to finish): }
-Enter code to append (or '.' to finish): .
+1> int main() {
+2>     return 0;
+3> }
+4> .
 sc> LIST
 sc> SAVE demo.sc
 ```

@@ -80,6 +80,504 @@ BUILTIN_SIGNATURES = {
     "exit": {"return_type": "void", "min_args": 1, "max_args": 1},
 }
 
+NUMERIC_TYPES = {"int", "char"}
+POINTER_TYPES = {"int*", "char*"}
+SCALAR_TYPES = NUMERIC_TYPES | POINTER_TYPES
+
+BUILTIN_PARAM_TYPES = {
+    "putchar": ["int"],
+    "getchar": [],
+    "printf": ["char*", "..."],
+    "puts": ["char*"],
+    "scanf": ["char*", "..."],
+    "strlen": ["char*"],
+    "strcpy": ["char*", "char*"],
+    "strcmp": ["char*", "char*"],
+    "strcat": ["char*", "char*"],
+    "abs": ["int"],
+    "max": ["int", "int"],
+    "min": ["int", "int"],
+    "pow": ["int", "int"],
+    "sqrt": ["int"],
+    "mod": ["int", "int"],
+    "rand": [],
+    "srand": ["int"],
+    "memset": ["char*", "int", "int"],
+    "sizeof_int": [],
+    "sizeof_char": [],
+    "atoi": ["char*"],
+    "itoa": ["int", "char*"],
+    "exit": ["int"],
+}
+
+
+class SemanticError(Exception):
+    pass
+
+
+class SemanticChecker:
+    def __init__(self):
+        self.errors = []
+        self.scopes = [{}]
+        self.functions = {}
+        self.current_function = None
+        self.loop_depth = 0
+        self.switch_depth = 0
+
+    def error(self, line, message):
+        self.errors.append(f"Error at line {line}: {message}")
+
+    def push_scope(self):
+        self.scopes.append({})
+
+    def pop_scope(self):
+        self.scopes.pop()
+
+    def define_var(self, name, var_type, line, is_array=False, array_size=None):
+        current = self.scopes[-1]
+        if name in current:
+            self.error(line, f"variable '{name}' is already defined in this scope.")
+            return
+        current[name] = {
+            "type": var_type,
+            "line": line,
+            "is_array": is_array,
+            "array_size": array_size,
+        }
+
+    def lookup_var(self, name, line):
+        for scope in reversed(self.scopes):
+            if name in scope:
+                return scope[name]
+        self.error(line, f"undefined variable '{name}'.")
+        return {"type": "int", "line": line, "is_array": False, "array_size": None}
+
+    def define_function(self, fn):
+        if fn.name in self.functions:
+            self.error(fn.line, f"function '{fn.name}' is already defined.")
+            return
+        self.functions[fn.name] = fn
+
+    def lookup_function(self, name, line):
+        if name not in self.functions and name not in BUILTIN_SIGNATURES:
+            self.error(line, f"undefined function '{name}'.")
+            return None
+        return self.functions.get(name)
+
+    def array_type(self, elem_type):
+        return f"{elem_type}[]"
+
+    def decay(self, value_type):
+        if value_type == "int[]":
+            return "int*"
+        if value_type == "char[]":
+            return "char*"
+        return value_type
+
+    def effective_param_type(self, param):
+        if param.is_array:
+            return f"{param.param_type}*"
+        return param.param_type
+
+    def is_assignable(self, target_type, value_type):
+        value_type = self.decay(value_type)
+        if target_type in NUMERIC_TYPES:
+            return value_type in NUMERIC_TYPES
+        if target_type in POINTER_TYPES:
+            return value_type == target_type
+        return False
+
+    def check_assignable(self, target_type, value_type, line, context):
+        if not self.is_assignable(target_type, value_type):
+            self.error(line, f"cannot use value of type {value_type} as {target_type} for {context}.")
+
+    def check(self, program):
+        self.collect_function_signatures(program)
+        self.check_top_level(program)
+        self.check_functions()
+        if not any(isinstance(node, parser.FunctionDef) and node.name == "main" for node in program):
+            self.error(1, "main function not found.")
+        else:
+            main_fn = self.functions.get("main")
+            if main_fn is not None:
+                if main_fn.return_type not in ("int", "void"):
+                    self.error(main_fn.line, "main function return type must be int or void.")
+                if len(main_fn.params) != 0:
+                    self.error(main_fn.line, "main function must not have parameters.")
+        if self.errors:
+            raise SemanticError("\n".join(self.errors) + f"\n{len(self.errors)} error(s) found.")
+
+    def collect_function_signatures(self, program):
+        for node in program:
+            if isinstance(node, parser.FunctionDef):
+                self.define_function(node)
+
+    def check_top_level(self, program):
+        for node in program:
+            if isinstance(node, parser.FunctionDef):
+                continue
+            self.check_stmt(node)
+
+    def check_functions(self):
+        for fn in self.functions.values():
+            self.current_function = fn
+            self.push_scope()
+            seen_params = set()
+            for param in fn.params:
+                param_type = self.effective_param_type(param)
+                if param.name in seen_params:
+                    self.error(param.line, f"parameter '{param.name}' is already defined.")
+                seen_params.add(param.name)
+                self.define_var(param.name, param_type, param.line)
+            body_returns = self.check_stmt(fn.body)
+            if fn.return_type != "void" and not body_returns:
+                self.error(fn.line, f"function '{fn.name}' may end without returning {fn.return_type}.")
+            self.pop_scope()
+            self.current_function = None
+
+    def check_block(self, block):
+        self.push_scope()
+        guaranteed_return = False
+        for stmt in block.statements:
+            if guaranteed_return:
+                self.check_stmt(stmt)
+                continue
+            guaranteed_return = self.check_stmt(stmt)
+        self.pop_scope()
+        return guaranteed_return
+
+    def check_statement_sequence_returns(self, statements):
+        guaranteed_return = False
+        for stmt in statements:
+            if guaranteed_return:
+                self.check_stmt(stmt)
+                continue
+            if isinstance(stmt, parser.BreakStmt):
+                self.check_stmt(stmt)
+                return False
+            guaranteed_return = self.check_stmt(stmt)
+        return guaranteed_return
+
+    def check_stmt(self, node):
+        if node is None or isinstance(node, parser.EmptyStmt):
+            return False
+        if isinstance(node, parser.Block):
+            return self.check_block(node)
+        if isinstance(node, parser.VarDecl):
+            self.check_var_decl(node)
+            return False
+        if isinstance(node, parser.ExpressionStmt):
+            self.expr_type(node.expr)
+            return False
+        if isinstance(node, parser.IfStmt):
+            cond_type = self.expr_type(node.condition)
+            if cond_type not in NUMERIC_TYPES:
+                self.error(node.line, f"if condition must be int or char, got {cond_type}.")
+            then_returns = self.check_stmt(node.then_branch)
+            else_returns = self.check_stmt(node.else_branch) if node.else_branch is not None else False
+            return then_returns and else_returns
+        if isinstance(node, parser.WhileStmt):
+            cond_type = self.expr_type(node.condition)
+            if cond_type not in NUMERIC_TYPES:
+                self.error(node.line, f"while condition must be int or char, got {cond_type}.")
+            self.loop_depth += 1
+            self.check_stmt(node.body)
+            self.loop_depth -= 1
+            return False
+        if isinstance(node, parser.DoWhileStmt):
+            self.loop_depth += 1
+            self.check_stmt(node.body)
+            self.loop_depth -= 1
+            cond_type = self.expr_type(node.condition)
+            if cond_type not in NUMERIC_TYPES:
+                self.error(node.line, f"do-while condition must be int or char, got {cond_type}.")
+            return False
+        if isinstance(node, parser.ForStmt):
+            self.push_scope()
+            if node.init is not None:
+                if isinstance(node.init, (parser.VarDecl, parser.ExpressionStmt, parser.EmptyStmt)):
+                    self.check_stmt(node.init)
+                else:
+                    self.expr_type(node.init)
+            if node.condition is not None:
+                cond_type = self.expr_type(node.condition)
+                if cond_type not in NUMERIC_TYPES:
+                    self.error(node.line, f"for condition must be int or char, got {cond_type}.")
+            if node.update is not None:
+                self.expr_type(node.update)
+            self.loop_depth += 1
+            self.check_stmt(node.body)
+            self.loop_depth -= 1
+            self.pop_scope()
+            return False
+        if isinstance(node, parser.SwitchStmt):
+            expr_type = self.expr_type(node.expr)
+            if expr_type not in NUMERIC_TYPES:
+                self.error(node.line, f"switch expression must be int or char, got {expr_type}.")
+            self.switch_depth += 1
+            self.push_scope()
+            has_default = False
+            all_clauses_return = True
+            for clause in node.clauses:
+                if clause.is_default:
+                    has_default = True
+                if not self.check_statement_sequence_returns(clause.statements):
+                    all_clauses_return = False
+            self.pop_scope()
+            self.switch_depth -= 1
+            return has_default and all_clauses_return
+        if isinstance(node, parser.BreakStmt):
+            if self.loop_depth == 0 and self.switch_depth == 0:
+                self.error(node.line, "break statement is only allowed inside a loop or switch.")
+            return False
+        if isinstance(node, parser.ContinueStmt):
+            if self.loop_depth == 0:
+                self.error(node.line, "continue statement is only allowed inside a loop.")
+            return False
+        if isinstance(node, parser.ReturnStmt):
+            self.check_return(node)
+            return True
+        self.error(getattr(node, "line", 1), f"unsupported statement type {type(node).__name__}.")
+        return False
+
+    def check_var_decl(self, node):
+        if node.is_array:
+            if node.var_type not in ("int", "char"):
+                self.error(node.line, f"array element type {node.var_type} is not supported.")
+            if node.array_size is None or node.array_size <= 0:
+                self.error(node.line, f"array '{node.name}' length must be greater than 0.")
+            if isinstance(node.init_expr, parser.String):
+                if node.var_type != "char":
+                    self.error(node.line, "string initializer is only valid for char arrays.")
+                if node.array_size is not None and len(node.init_expr.value) + 1 > node.array_size:
+                    self.error(node.line, f"string initializer for '{node.name}' is larger than array size.")
+            elif isinstance(node.init_expr, parser.InitList):
+                for index, value in enumerate(node.init_expr.values):
+                    value_type = self.expr_type(value)
+                    if value_type not in NUMERIC_TYPES:
+                        self.error(node.line, f"array '{node.name}' element {index} cannot be initialized with {value_type}.")
+            elif node.init_expr is not None:
+                self.error(node.line, f"array '{node.name}' initializer must be a string or initializer list.")
+            self.define_var(node.name, node.var_type, node.line, is_array=True, array_size=node.array_size)
+            return
+
+        if node.var_type not in SCALAR_TYPES:
+            self.error(node.line, f"unsupported variable type {node.var_type}.")
+        if node.init_expr is not None:
+            init_type = self.expr_type(node.init_expr)
+            self.check_assignable(node.var_type, init_type, node.line, f"initializer of '{node.name}'")
+        self.define_var(node.name, node.var_type, node.line)
+
+    def check_return(self, node):
+        if self.current_function is None:
+            self.error(node.line, "return statement is only allowed inside a function.")
+            return
+        expected = self.current_function.return_type
+        if node.expr is None:
+            if expected != "void":
+                self.error(node.line, f"function '{self.current_function.name}' must return {expected}.")
+            return
+        value_type = self.expr_type(node.expr)
+        if expected == "void":
+            self.error(node.line, f"void function '{self.current_function.name}' should not return a value.")
+            return
+        self.check_assignable(expected, value_type, node.line, f"return from '{self.current_function.name}'")
+
+    def lvalue_type(self, expr):
+        if isinstance(expr, parser.Identifier):
+            symbol = self.lookup_var(expr.name, expr.line)
+            if symbol["is_array"]:
+                self.error(expr.line, f"cannot assign to array '{expr.name}'.")
+            return symbol["type"]
+        if isinstance(expr, parser.IndexExpr):
+            if isinstance(expr.base, parser.String):
+                self.error(expr.line, "cannot assign to string literal.")
+            base_type = self.expr_type(expr.base)
+            index_type = self.expr_type(expr.index)
+            if index_type not in NUMERIC_TYPES:
+                self.error(expr.line, f"array index must be int or char, got {index_type}.")
+            decayed = self.decay(base_type)
+            if decayed == "int*":
+                return "int"
+            if decayed == "char*":
+                return "char"
+            self.error(expr.line, f"cannot apply index operator to {base_type}.")
+            return "int"
+        if isinstance(expr, parser.UnaryExpr) and expr.operator == "*":
+            ptr_type = self.expr_type(expr.operand)
+            if ptr_type == "int*":
+                return "int"
+            if ptr_type == "char*":
+                return "char"
+            self.error(expr.line, f"cannot apply unary '*' to non-pointer expression of type {ptr_type}.")
+            return "int"
+        self.error(getattr(expr, "line", 1), "left side of assignment must be a modifiable lvalue.")
+        return "int"
+
+    def expr_type(self, expr):
+        if isinstance(expr, parser.Number):
+            return "int"
+        if isinstance(expr, parser.Char):
+            return "char"
+        if isinstance(expr, parser.String):
+            return "char[]"
+        if isinstance(expr, parser.Identifier):
+            symbol = self.lookup_var(expr.name, expr.line)
+            if symbol["is_array"]:
+                return self.array_type(symbol["type"])
+            return symbol["type"]
+        if isinstance(expr, parser.InitList):
+            self.error(expr.line, "initializer list is only valid in array declarations.")
+            return "int"
+        if isinstance(expr, parser.IndexExpr):
+            base_type = self.expr_type(expr.base)
+            index_type = self.expr_type(expr.index)
+            if index_type not in NUMERIC_TYPES:
+                self.error(expr.line, f"array index must be int or char, got {index_type}.")
+            decayed = self.decay(base_type)
+            if decayed == "int*":
+                return "int"
+            if decayed == "char*":
+                return "char"
+            self.error(expr.line, f"cannot apply index operator to {base_type}.")
+            return "int"
+        if isinstance(expr, parser.UnaryExpr):
+            return self.unary_type(expr)
+        if isinstance(expr, parser.BinaryExpr):
+            return self.binary_type(expr)
+        if isinstance(expr, parser.AssignmentExpr):
+            target_type = self.lvalue_type(expr.left)
+            right_type = self.expr_type(expr.right)
+            if expr.operator == "=":
+                self.check_assignable(target_type, right_type, expr.line, "assignment")
+                return target_type
+            if expr.operator in ("+=", "-="):
+                decayed_target = self.decay(target_type)
+                if decayed_target in POINTER_TYPES and right_type in NUMERIC_TYPES:
+                    return target_type
+                if target_type in NUMERIC_TYPES and right_type in NUMERIC_TYPES:
+                    return target_type
+                self.error(expr.line, f"cannot apply operator '{expr.operator}' to {target_type} and {right_type}.")
+                return target_type
+            if expr.operator in ("*=", "/=", "%="):
+                if target_type not in NUMERIC_TYPES or right_type not in NUMERIC_TYPES:
+                    self.error(expr.line, f"cannot apply operator '{expr.operator}' to {target_type} and {right_type}.")
+                return target_type
+            self.error(expr.line, f"unsupported assignment operator '{expr.operator}'.")
+            return target_type
+        if isinstance(expr, parser.CallExpr):
+            return self.call_type(expr)
+        self.error(getattr(expr, "line", 1), f"unsupported expression type {type(expr).__name__}.")
+        return "int"
+
+    def unary_type(self, expr):
+        operand_type = self.expr_type(expr.operand)
+        if expr.operator in ("+", "-", "!", "~"):
+            if operand_type not in NUMERIC_TYPES:
+                self.error(expr.line, f"cannot apply unary '{expr.operator}' to {operand_type}.")
+            return "int"
+        if expr.operator == "&":
+            if isinstance(expr.operand, parser.Identifier):
+                symbol = self.lookup_var(expr.operand.name, expr.line)
+                if symbol["is_array"]:
+                    self.error(expr.line, f"cannot apply unary '&' to array '{expr.operand.name}'.")
+                    return f"{symbol['type']}*"
+                if symbol["type"] in POINTER_TYPES:
+                    self.error(expr.line, f"cannot apply unary '&' to pointer variable '{expr.operand.name}'.")
+                    return symbol["type"]
+                return f"{symbol['type']}*"
+            if isinstance(expr.operand, parser.IndexExpr):
+                target_type = self.lvalue_type(expr.operand)
+                return f"{target_type}*"
+            self.error(expr.line, "cannot apply unary '&' to non-variable.")
+            return "int*"
+        if expr.operator == "*":
+            decayed = self.decay(operand_type)
+            if decayed == "int*":
+                return "int"
+            if decayed == "char*":
+                return "char"
+            self.error(expr.line, f"cannot apply unary '*' to non-pointer expression of type {operand_type}.")
+            return "int"
+        if expr.operator in ("++", "--"):
+            target_type = self.lvalue_type(expr.operand)
+            if target_type not in SCALAR_TYPES:
+                self.error(expr.line, f"cannot apply unary '{expr.operator}' to {target_type}.")
+            return target_type
+        self.error(expr.line, f"unsupported unary operator '{expr.operator}'.")
+        return "int"
+
+    def binary_type(self, expr):
+        left_type = self.expr_type(expr.left)
+        right_type = self.expr_type(expr.right)
+        if expr.operator in ("&&", "||"):
+            if left_type not in NUMERIC_TYPES or right_type not in NUMERIC_TYPES:
+                self.error(expr.line, f"cannot apply operator '{expr.operator}' to {left_type} and {right_type}.")
+            return "int"
+        if expr.operator == "+":
+            left_decayed = self.decay(left_type)
+            right_decayed = self.decay(right_type)
+            if left_type in NUMERIC_TYPES and right_type in NUMERIC_TYPES:
+                return "int"
+            if left_decayed in POINTER_TYPES and right_type in NUMERIC_TYPES:
+                return left_decayed
+            if left_type in NUMERIC_TYPES and right_decayed in POINTER_TYPES:
+                return right_decayed
+            self.error(expr.line, f"cannot apply operator '+' to {left_type} and {right_type}.")
+            return "int"
+        if expr.operator == "-":
+            left_decayed = self.decay(left_type)
+            right_decayed = self.decay(right_type)
+            if left_type in NUMERIC_TYPES and right_type in NUMERIC_TYPES:
+                return "int"
+            if left_decayed in POINTER_TYPES and right_type in NUMERIC_TYPES:
+                return left_decayed
+            if left_decayed == right_decayed and left_decayed in POINTER_TYPES:
+                return "int"
+            self.error(expr.line, f"cannot apply operator '-' to {left_type} and {right_type}.")
+            return "int"
+        if expr.operator in ("*", "/", "%", "&", "|", "^", "<<", ">>", "<", "<=", ">", ">=", "==", "!="):
+            if left_type not in NUMERIC_TYPES or right_type not in NUMERIC_TYPES:
+                self.error(expr.line, f"cannot apply operator '{expr.operator}' to {left_type} and {right_type}.")
+            return "int"
+        self.error(expr.line, f"unsupported binary operator '{expr.operator}'.")
+        return "int"
+
+    def call_type(self, expr):
+        if not isinstance(expr.fn, parser.Identifier):
+            self.error(expr.line, "function name must be an identifier.")
+            return "int"
+        name = expr.fn.name
+        arg_types = [self.decay(self.expr_type(arg)) for arg in expr.args]
+        if name in BUILTIN_SIGNATURES:
+            signature = BUILTIN_SIGNATURES[name]
+            min_args = signature["min_args"]
+            max_args = signature["max_args"]
+            if len(arg_types) < min_args or (max_args is not None and len(arg_types) > max_args):
+                expected = f"at least {min_args}" if max_args is None else str(min_args)
+                self.error(expr.line, f"function '{name}' expects {expected} arguments, got {len(arg_types)}.")
+            expected_types = BUILTIN_PARAM_TYPES.get(name, [])
+            for index, expected_type in enumerate(expected_types):
+                if expected_type == "...":
+                    break
+                if index < len(arg_types):
+                    self.check_assignable(expected_type, arg_types[index], expr.line, f"parameter {index + 1} of '{name}'")
+            return signature["return_type"]
+
+        fn = self.lookup_function(name, expr.line)
+        if fn is None:
+            return "int"
+        if len(arg_types) != len(fn.params):
+            self.error(expr.line, f"function '{name}' expects {len(fn.params)} arguments, got {len(arg_types)}.")
+        for index, (arg_type, param) in enumerate(zip(arg_types, fn.params)):
+            param_type = self.effective_param_type(param)
+            self.check_assignable(param_type, arg_type, expr.line, f"parameter {index + 1} '{param.name}' of '{name}'")
+        return fn.return_type
+
+
+def check_semantics(program):
+    SemanticChecker().check(program)
+
 # break / continue 可能出現在巢狀 block 或 if 裡，
 # 用內部 signal 往外傳遞，直到最近的迴圈節點接住。
 class BreakSignal(Exception):
@@ -87,6 +585,11 @@ class BreakSignal(Exception):
 
 class ContinueSignal(Exception):
     pass
+
+class ExitSignal(Exception):
+    def __init__(self, code, line):
+        self.code = code
+        self.line = line
 
 class ReturnSignal(Exception):
     """函式內 return 用的控制流程訊號，攜帶回傳值往外層 CallExpr 傳遞。"""
@@ -307,6 +810,13 @@ class Interpreter:
             raise Exception(f"Runtime error: Missing built-in signature for '{function_name}' at line {line}.")
 
         self.validate_argument_count(function_name, signature["min_args"], signature["max_args"], len(arg_values), line)
+
+        if function_name == "exit":
+            code = arg_values[0]
+            if type(code) is not int:
+                got_type = type_mapping.get(type(code).__name__, type(code).__name__)
+                raise Exception(f"Runtime error: exit expects int, got {got_type} at line {line}.")
+            raise ExitSignal(code, line)
 
         builtin_func = getattr(c_builtins, function_name)
         if function_name == "rand":
@@ -623,7 +1133,7 @@ class Interpreter:
                 #   "abc" -> char*、char buf[] -> char*、int arr[] -> int*。
                 # 這樣 built-in 與 user-defined function 都共用同一套參數轉換規則。
                 args.append(self.decay_array_value(self.evaluate(arg)))
-            if function_name in builtins_funcs:
+            if function_name in BUILTIN_SIGNATURES:
                 return_value = self.call_builtin_function(function_name, args, ast_node.line)
             else:
                 return_value = self.call_user_function(function_name, args, ast_node.line)
