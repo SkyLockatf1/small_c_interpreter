@@ -88,6 +88,7 @@ def run_program_buffer(buffer: list[str], macro_definitions: dict[str, str], tra
     if main_function is None:
         print("Error: main function not found.")
         return None
+    interpreter.check_semantics(program)
 
     runtime = interpreter.Interpreter()
     # 函式定義與全域宣告只是 RUN 前的載入流程，不屬於 main() 的逐步執行 trace。
