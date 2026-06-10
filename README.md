@@ -40,6 +40,21 @@
 python main.py
 ```
 
+Textual TUI frontend:
+
+```bash
+pip install -r requirements.txt
+python main_tui.py
+```
+
+The TUI editor uses tree-sitter based Small-C/C syntax highlighting for keywords such as `int`, `char`, `return`, `if`, `switch`, and `case`.
+
+Without installing dependencies globally:
+
+```bash
+uv run --with textual --with tree-sitter --with tree-sitter-c python main_tui.py
+```
+
 在 Linux / macOS 環境也可以使用：
 
 ```bash

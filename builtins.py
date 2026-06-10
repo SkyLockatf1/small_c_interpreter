@@ -41,20 +41,31 @@ def printf(vm: VirtualMemory, fmt: char_ptr, *args) -> None:
     while i < len(format_str):
         if format_str[i] == '%' and i + 1 < len(format_str):
             # 遇到 % 時，讀取下一個字元判斷格式指定字。
-            specifier = format_str[i + 1]
+            specifier_index = i + 1
+            width_text = ""
+            while specifier_index < len(format_str) and format_str[specifier_index].isdigit():
+                width_text += format_str[specifier_index]
+                specifier_index += 1
+            if specifier_index >= len(format_str):
+                raise Exception("Runtime error: printf format string ends after width")
+            width = int(width_text) if width_text else 0
+            specifier = format_str[specifier_index]
             if specifier == '%':
+                if width_text:
+                    raise Exception("Runtime error: printf width is not supported for %%")
                 result += '%'
                 i += 2
             elif specifier == 'd':
                 if arg_index >= len(args):
                     raise Exception("Runtime error: printf argument missing")
                 if type(args[arg_index]) is int:
-                    result += str(args[arg_index])
+                    text = str(args[arg_index])
+                    result += text.rjust(width) if width else text
                 else:
                     got_type = type_mapping.get(type(args[arg_index]).__name__, type(args[arg_index]).__name__)
                     raise Exception(f"Runtime error: printf expects int for %d, got {got_type}")
                 arg_index += 1
-                i += 2
+                i = specifier_index + 1
             elif specifier == 's':
                 if arg_index >= len(args):
                     raise Exception("Runtime error: printf argument missing")
@@ -62,9 +73,10 @@ def printf(vm: VirtualMemory, fmt: char_ptr, *args) -> None:
                     got_type = type_mapping.get(type(args[arg_index]).__name__, type(args[arg_index]).__name__)
                     raise Exception(f"Runtime error: printf expects char* for %s, got {got_type}")
                 # read_cstring 處理邊界驗證，不需要手動逐字元迴圈
-                result += vm.read_cstring(args[arg_index].addr)
+                text = vm.read_cstring(args[arg_index].addr)
+                result += text.rjust(width) if width else text
                 arg_index += 1
-                i += 2
+                i = specifier_index + 1
             elif specifier == 'c':
                 if arg_index >= len(args):
                     raise Exception("Runtime error: printf argument missing")
@@ -77,20 +89,20 @@ def printf(vm: VirtualMemory, fmt: char_ptr, *args) -> None:
                     got_type = type_mapping.get(type(value).__name__, type(value).__name__)
                     raise Exception(f"Runtime error: printf %c expects int ASCII code 0..127, got {got_type}")
                 arg_index += 1
-                i += 2
+                i = specifier_index + 1
             elif specifier == 'x':
                 if arg_index >= len(args):
                     raise Exception("Runtime error: printf argument missing")
                 if type(args[arg_index]) is not int:
                     got_type = type_mapping.get(type(args[arg_index]).__name__, type(args[arg_index]).__name__)
                     raise Exception(f"Runtime error: printf expects int for %x, got {got_type}")
-                result += format(args[arg_index], 'x')
+                text = format(args[arg_index], 'x')
+                result += text.rjust(width) if width else text
                 arg_index += 1
-                i += 2
+                i = specifier_index + 1
             else:
                 # 不支援的格式指定字照原字元輸出。
-                result += format_str[i]
-                i += 1
+                raise Exception(f"Runtime error: printf unsupported format specifier %{width_text}{specifier}")
         else:
             result += format_str[i]
             i += 1

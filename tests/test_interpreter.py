@@ -1624,3 +1624,6 @@ class TestInterpreterErrors:
         message = str(exc.value)
         assert "switch expression" in message
         assert "int" in message
+def test_printf_supports_minimum_field_width_for_int(fresh_interp, capsys):
+    _run_code(fresh_interp, 'printf("%2d|%2d", 7, 42);')
+    assert _filter_debug(capsys.readouterr().out) == " 7|42"
