@@ -772,7 +772,7 @@ class parser:
         return self.parse_postfix()
 
     def parse_postfix(self):
-        """第 1 級：後綴函式呼叫 () 與陣列索引 []，左結合且可連續出現。"""
+        """第 1 級：後綴函式呼叫 ()、陣列索引 []、後綴 ++/--，左結合且可連續出現。"""
         expr = self.parse_primary()
         # 後綴運算優先權最高，像 f()[i](x) 會從左到右一層層包成 AST。
         while True:
@@ -797,7 +797,10 @@ class parser:
                     self.expect("]", lexer.token_type.punctuator)
                     expr = IndexExpr(expr, index, bracket_token.line)
                 else:
-                    break
+                    operator = self.match_operator({"++", "--"})
+                    if operator is None:
+                        break
+                    expr = UnaryExpr(operator.value, expr, operator.line, postfix=True)
         return expr
 
     def parse_primary(self):

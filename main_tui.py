@@ -203,7 +203,7 @@ class TripleMega(App):
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
         with Vertical(id="root"):
-            yield Static("Small-C TUI  |  F5 RUN  F6 CHECK  Ctrl+S SAVE  Ctrl+O LOAD", id="title-line")
+            yield Static("Triple Mega TUI  |  F5 RUN  F6 CHECK  Ctrl+S SAVE  Ctrl+O LOAD", id="title-line")
             with Horizontal(id="workspace"):
                 with Vertical(id="left-pane"):
                     yield Static("BUFFER", classes="pane-title")
@@ -217,7 +217,7 @@ class TripleMega(App):
         yield Footer()
 
     def on_mount(self) -> None:
-        self.output.write("[bold #b8d7ff]Small-C Interactive Interpreter TUI[/]")
+        self.output.write("[bold #b8d7ff]Triple Mega Small-C Interactive Interpreter TUI[/]")
         self.output.write("Type HELP for commands. Enter Small-C single lines at sc>; they are not added to BUFFER.")
         self.apply_pane_ratio()
         self.update_status()

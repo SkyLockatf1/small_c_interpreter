@@ -95,6 +95,47 @@ class TestInterpreterVariables:
         _run_code(fresh_interp, "int x = 32 >> 2;")
         assert _get_int(fresh_interp, "x") == 8
 
+    def test_prefix_increment_returns_new_value(self, fresh_interp):
+        _run_code(fresh_interp, "int x = 5; int y = ++x;")
+        assert _get_int(fresh_interp, "x") == 6
+        assert _get_int(fresh_interp, "y") == 6
+
+    def test_postfix_increment_returns_old_value(self, fresh_interp):
+        _run_code(fresh_interp, "int x = 5; int y = x++;")
+        assert _get_int(fresh_interp, "x") == 6
+        assert _get_int(fresh_interp, "y") == 5
+
+    def test_prefix_and_postfix_decrement(self, fresh_interp):
+        _run_code(fresh_interp, "int x = 5; int a = --x; int b = x--;")
+        assert _get_int(fresh_interp, "x") == 3
+        assert _get_int(fresh_interp, "a") == 4
+        assert _get_int(fresh_interp, "b") == 4
+
+    def test_increment_array_element_lvalue(self, fresh_interp):
+        _run_code(fresh_interp, "int arr[2]; arr[0] = 7; int old = arr[0]++; int now = ++arr[0];")
+        assert _get_int(fresh_interp, "old") == 7
+        assert _get_int(fresh_interp, "now") == 9
+
+    def test_increment_dereferenced_pointer_lvalue(self, fresh_interp):
+        _run_code(fresh_interp, "int x = 7; int *p = &x; int old = (*p)++; int now = ++(*p);")
+        assert _get_int(fresh_interp, "x") == 9
+        assert _get_int(fresh_interp, "old") == 7
+        assert _get_int(fresh_interp, "now") == 9
+
+    def test_prefix_and_postfix_pointer_increment(self, fresh_interp):
+        code = (
+            "int arr[3];"
+            "arr[0] = 10; arr[1] = 20; arr[2] = 30;"
+            "int *p = &arr[0];"
+            "int first = *p++;"
+            "int second = *p;"
+            "int third = *++p;"
+        )
+        _run_code(fresh_interp, code)
+        assert _get_int(fresh_interp, "first") == 10
+        assert _get_int(fresh_interp, "second") == 20
+        assert _get_int(fresh_interp, "third") == 30
+
 
 class TestVariableScenario:
     """

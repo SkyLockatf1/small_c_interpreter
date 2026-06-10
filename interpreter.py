@@ -754,6 +754,24 @@ class Interpreter:
             return
         raise Exception(f"Runtime error: Unsupported lvalue type {value_type} at line {line}.")
 
+    def apply_increment_decrement(self, operand, operator: str, postfix: bool, line: int):
+        """執行 ++/--，前綴回傳新值、後綴回傳舊值。"""
+        addr, value_type = self.resolve_lvalue(operand)
+        old_val = self.read_lvalue(addr, value_type)
+        delta = 1 if operator == "++" else -1
+
+        if value_type in ("int", "char"):
+            new_val = old_val + delta
+        elif value_type == "int*":
+            new_val = int_ptr(self.memory.ptr_add(old_val.addr, delta, "int"))
+        elif value_type == "char*":
+            new_val = char_ptr(self.memory.ptr_add(old_val.addr, delta, "char"))
+        else:
+            raise Exception(f"Runtime error: Cannot apply unary '{operator}' to {value_type} at line {line}.")
+
+        self.write_lvalue(addr, value_type, new_val, line)
+        return old_val if postfix else new_val
+
     def alloc_for_current_scope(self, size: int) -> int:
         """全域宣告配置在 global 區；函式 scope 內的變數配置在 stack frame。"""
         if self.symtable.current_scope_level() == 0:
@@ -949,58 +967,13 @@ class Interpreter:
                 elif isinstance(ptr, char_ptr):
                     self.memory.check_ptr(ptr.addr,1) # 是否為有效指標（非 null pointer，且不越界）
                     return self.memory.get_char(ptr.addr)
-            elif ast_node.operator == "++" and ast_node.postfix == False:
-                if not isinstance(ast_node.operand, parser.Identifier):
-                    raise Exception(f"Runtime error: Cannot apply unary '++' to non-variable at line {ast_node.line}.")
-                var_info = self.symtable.lookup_var(ast_node.operand.name)
-                old_val=0
-                if var_info.var_type == 'int':
-                    old_val = self.memory.get_int(var_info.addr)
-                    self.memory.set_int(var_info.addr, old_val + 1)
-                elif var_info.var_type == 'char':
-                    old_val = self.memory.get_char(var_info.addr)
-                    self.memory.set_char(var_info.addr, old_val + 1)
-                elif var_info.var_type == 'int*':
-                    old_addr = self.memory.get_ptr(var_info.addr) # 取得目前指標值
-                    new_addr = self.memory.ptr_add(old_addr, 1, "int") # 指標運算：假設是 int*，每次加 1 就加 4 bytes
-                    self.memory.set_ptr(var_info.addr, new_addr)
-                    return int_ptr(new_addr) # 回傳加 4 後的指標值
-                elif var_info.var_type == 'char*':
-                    old_addr = self.memory.get_ptr(var_info.addr) # 取得目前指標值
-                    new_addr = self.memory.ptr_add(old_addr, 1, "char") # 指標運算：char* 加 1 實際上地址加 1
-                    self.memory.set_ptr(var_info.addr, new_addr)
-                    return char_ptr(new_addr) # 回傳加 1 後的指標值
-                else:
-                    raise Exception(f"Runtime error: Unsupported variable type {var_info.var_type} for variable '{ast_node.operand.name}' at line {ast_node.line}.")
-                return old_val + 1
-            elif ast_node.operator == "--" and ast_node.postfix == False:
-                if not isinstance(ast_node.operand, parser.Identifier):
-                    raise Exception(f"Runtime error: Cannot apply unary '--' to non-variable at line {ast_node.line}.")
-                var_info = self.symtable.lookup_var(ast_node.operand.name)
-                old_val=0
-                if var_info.var_type == 'int':
-                    old_val = self.memory.get_int(var_info.addr)
-                    self.memory.set_int(var_info.addr, old_val - 1)
-                    return old_val - 1
-                elif var_info.var_type == 'char':
-                    old_val = self.memory.get_char(var_info.addr)
-                    self.memory.set_char(var_info.addr, old_val - 1)
-                    return old_val - 1
-                elif var_info.var_type == 'int*':
-                    old_addr = self.memory.get_ptr(var_info.addr) # 取得目前指標值
-                    new_addr = self.memory.ptr_add(old_addr, -1, "int") # 指標運算：int*，每次減 1 就減 4 bytes
-                    self.memory.set_ptr(var_info.addr, new_addr)
-                    return int_ptr(new_addr) # 回傳減 4 後的指標值
-                elif var_info.var_type == 'char*':
-                    old_addr = self.memory.get_ptr(var_info.addr) # 取得目前指標值
-                    new_addr = self.memory.ptr_add(old_addr, -1, "char") # 指標運算：char* 減 1 實際上地址減 1
-                    self.memory.set_ptr(var_info.addr, new_addr)
-                    return char_ptr(new_addr) # 回傳減 1 後的指標值
-                else:
-                    raise Exception(f"Runtime error: Unsupported variable type {var_info.var_type} for variable '{ast_node.operand.name}' at line {ast_node.line}.")
-                
-                
-                
+            elif ast_node.operator in ("++", "--"):
+                return self.apply_increment_decrement(
+                    ast_node.operand,
+                    ast_node.operator,
+                    ast_node.postfix,
+                    ast_node.line,
+                )
         elif isinstance(ast_node, parser.BinaryExpr):
             # 二元運算採延遲求值：先求左子表達式，
             # 對於 && / || 採短路（必要時才求右子表達式），其餘運算再求右子表達式。

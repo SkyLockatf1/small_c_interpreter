@@ -60,12 +60,13 @@ def printf(vm: VirtualMemory, fmt: char_ptr, *args) -> None:
                     raise Exception("Runtime error: printf argument missing")
                 value = args[arg_index]
                 if type(value) is int:
-                    result += str(value)
+                    text = str(value)
                 elif type(value) is int_ptr:
-                    result += str(value.addr)
+                    text = str(value.addr)
                 else:
                     got_type = type_mapping.get(type(value).__name__, type(value).__name__)
                     raise Exception(f"Runtime error: printf expects int for %d, got {got_type}")
+                result += text.rjust(width) if width else text
                 arg_index += 1
                 i = specifier_index + 1
             elif specifier == 's':
@@ -84,12 +85,13 @@ def printf(vm: VirtualMemory, fmt: char_ptr, *args) -> None:
                     raise Exception("Runtime error: printf argument missing")
                 value = args[arg_index]
                 if type(value) is int and 0 <= value <= 127:
-                    result += chr(value)  # %c 僅支援 ASCII 字元碼 0..127。
+                    text = chr(value)  # %c 僅支援 ASCII 字元碼 0..127。
                 elif type(value) is int:
                     raise Exception(f"Runtime error: printf %c expects ASCII code 0..127, got {value}")
                 else:
                     got_type = type_mapping.get(type(value).__name__, type(value).__name__)
                     raise Exception(f"Runtime error: printf %c expects int ASCII code 0..127, got {got_type}")
+                result += text.rjust(width) if width else text
                 arg_index += 1
                 i = specifier_index + 1
             elif specifier == 'x':
