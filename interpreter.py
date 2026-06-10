@@ -102,8 +102,41 @@ class Interpreter:
         self.memory: memory.VirtualMemory = memory.VirtualMemory()
         self.symtable: symtable.symtable = symtable.symtable()
         self.trace_enabled = False # 之後實作 TRACE 指令時會用到
+        # RUN 會填入「原始程式行號 -> 原始碼文字」，TRACE 才能印出使用者看得到的語句。
+        self.trace_source_lines: dict[int, str] = {}
         self._rng = random.Random(1)
         self.randseed = 1
+
+    def is_traceable_statement(self, ast_node) -> bool:
+        """判斷 AST 節點是否代表一個可執行語句，而不是 expression 內部節點。"""
+        return isinstance(ast_node, (
+            parser.VarDecl,
+            parser.ExpressionStmt,
+            parser.IfStmt,
+            parser.WhileStmt,
+            parser.DoWhileStmt,
+            parser.ForStmt,
+            parser.SwitchStmt,
+            parser.BreakStmt,
+            parser.ContinueStmt,
+            parser.ReturnStmt,
+            parser.EmptyStmt,
+        ))
+
+    def trace_statement(self, ast_node) -> None:
+        """TRACE ON 時，在執行 statement 前顯示來源行號與原始程式碼。"""
+        if not self.trace_enabled or not self.trace_source_lines:
+            return
+        if not self.is_traceable_statement(ast_node):
+            return
+
+        line = getattr(ast_node, "line", None)
+        if line is None:
+            return
+        source = self.trace_source_lines.get(line, "").strip()
+        if source == "":
+            source = repr(ast_node)
+        print(f"[line {line}] {source}")
 
     def decay_array_value(self, value):
         """將 expression 中的陣列值轉成首元素指標，對應 C 的 array-to-pointer decay。"""
@@ -328,6 +361,7 @@ class Interpreter:
 
     def evaluate(self, ast_node):
         # 根據 AST 節點型別遞迴求值，回傳此節點在目前執行環境中的值。
+        self.trace_statement(ast_node)
         if isinstance(ast_node, parser.Number):
             # 數字常數直接回傳原值，不需要額外查表。
             return ast_node.value
@@ -782,6 +816,10 @@ class Interpreter:
             # 寫入記憶體
             self.write_lvalue(target_addr, target_type, new_val, ast_node.line)
             return new_val
+
+        elif isinstance(ast_node, parser.ExpressionStmt):
+            # 只有這裡代表 expression 被當成完整語句執行；內部 expression 節點不應各自輸出 TRACE。
+            return self.evaluate(ast_node.expr)
         
         elif isinstance(ast_node, parser.EmptyStmt):
             return None

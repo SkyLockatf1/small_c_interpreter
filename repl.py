@@ -132,8 +132,9 @@ def HELP(cmd: str = ""):
 def APPEND(buffer:list[str]) -> bool:
     modified = False
     while True:
-        new_code = input("Enter code to append (or '.' to finish): ").strip()
-        if new_code == ".": # 空行結束輸入
+        # 不使用 strip()，避免把使用者輸入的程式縮排移除。
+        new_code = input("Enter code to append (or '.' to finish): ")
+        if new_code.strip() == ".": # 空行結束輸入
             break
         buffer.append(new_code)
         modified = True  # 至少追加了一行才標記為已修改
@@ -176,8 +177,9 @@ def EDIT(buffer: list[str], arg: int) -> bool:
     if arg < 1 or arg > len(buffer):
         raise Exception(f"REPL error: Index {arg} out of bounds. Valid range is 1 to {len(buffer)}")
     print(f"Current code at line {arg}: {buffer[arg-1]}")
-    new_code = input("Enter new code: ").strip()
-    if new_code == "":
+    # 空字串才代表取消；若使用者輸入前導空白，必須保留作為程式縮排。
+    new_code = input("Enter new code: ")
+    if new_code.strip() == "":
         return False  # 使用者直接按 Enter 取消，未修改 buffer
     buffer[arg-1] = new_code
     return True  # 實際更改了內容

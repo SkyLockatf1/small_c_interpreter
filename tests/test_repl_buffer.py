@@ -238,11 +238,11 @@ class TestReplAppend:
         repl.APPEND(buffer)
         assert buffer == lines
 
-    def test_append_strips_whitespace(self, buffer, monkeypatch):
+    def test_append_preserves_indentation(self, buffer, monkeypatch):
         inputs = iter(["  int x;  ", "."])
         monkeypatch.setattr("builtins.input", lambda prompt="": next(inputs))
         repl.APPEND(buffer)
-        assert buffer == ["int x;"]
+        assert buffer == ["  int x;  "]
 
 
 class TestReplInsert:
@@ -314,6 +314,12 @@ class TestReplEdit:
         monkeypatch.setattr("builtins.input", lambda prompt="": next(inputs))
         repl.EDIT(filled_buffer, 3)
         assert filled_buffer[2] == original_line
+
+    def test_edit_preserves_indentation(self, filled_buffer, monkeypatch):
+        inputs = iter(["    printf(\"hi\\n\");"])
+        monkeypatch.setattr("builtins.input", lambda prompt="": next(inputs))
+        repl.EDIT(filled_buffer, 2)
+        assert filled_buffer[1] == "    printf(\"hi\\n\");"
 
     def test_edit_shows_current_line_before_input(self, filled_buffer, monkeypatch, capsys):
         inputs = iter([""])

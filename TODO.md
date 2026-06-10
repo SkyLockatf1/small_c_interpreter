@@ -52,11 +52,12 @@
 - `scanf`：已支援 `%d` / `%c`，會檢查 `int*` / `char*`，輸入不匹配時回傳成功讀取數量。
 - `strcat(char* dest, char* src)`：已實作字串串接，並透過 allocation 邊界檢查避免 buffer overflow。
 - 互動模式行號：lexer 已支援 `line_start`，使互動輸入的錯誤行號可對齊 buffer / `LIST` 行號。
+- `TRACE ON` / `TRACE OFF`：已支援狀態切換；`RUN` 時會從 `main()` 開始，在每個 statement 執行前輸出 `[line n] <statement>`，使用者函式內部語句也會被追蹤。
+- `APPEND` / `EDIT`：已保留使用者輸入的前導空白與縮排，不再用 `.strip()` 清掉程式碼格式。
 
 ### 部分完成
 
 - `CHECK`：已接上 lexer/parser，能檢查詞法與語法錯誤且不執行程式；完整語意檢查仍待補。
-- `TRACE ON` / `TRACE OFF`：指令狀態切換已完成，但尚未實作逐 statement trace 輸出。
 - string / pointer bounds check：`read_cstring()`、`write_cstring()`、`check_ptr()` 已存在並被多數 built-ins 使用；`scanf(%d/%c)` 與 `strcat` 已接上 pointer / allocation 檢查。若未來新增會寫入字串的功能，仍需確認 buffer 邊界。
 
 ---
@@ -134,23 +135,24 @@ No errors found.
 
 ---
 
-### TODO 4：完成 `TRACE ON` / `TRACE OFF`
+### TODO 4：`TRACE ON` / `TRACE OFF` 已完成
 
-目前 `TRACE ON` / `TRACE OFF` 的狀態切換已完成，但逐 statement trace 尚未實作。
+目前 `TRACE ON` / `TRACE OFF` 已可切換追蹤狀態，並在 `RUN` 執行 `main()` 與使用者函式時輸出逐 statement trace。
 
 #### 已完成
 
 - `TRACE ON` 會設定 `interpreter_instance.trace_enabled = True`。
 - `TRACE OFF` 會設定 `interpreter_instance.trace_enabled = False`。
 - `NEW` 會建立新的 `Interpreter()`，因此會重置 trace 狀態。
-
-#### 需要完成
-
 - 每個 statement 執行前輸出類似格式：
 
 ```text
 [line n] <statement>
 ```
+
+- `ExpressionStmt` 用來區分「完整 expression statement」與 expression 內部節點，避免 `printf()` 參數、二元運算或函式呼叫實參被誤印成 trace。
+- `RUN` 會建立 `trace_source_lines`，用 AST 行號找回 buffer 原始程式碼行。
+- `RUN` 載入函式定義與全域宣告時不輸出 trace；從呼叫 `main()` 開始才輸出 trace。
 
 ---
 
@@ -529,9 +531,9 @@ Semester: Spring 2026
 ---
 
 
-### TODO 18：修正 `APPEND` / `INSERT` 輸入提示
+### TODO 18：修正 `INSERT` 輸入提示與縮排保留
 
-目前 `APPEND` 的提示不像作業範例。
+目前 `APPEND` 與 `EDIT` 已可保留縮排；`INSERT` 仍使用 `.strip()`，且提示格式不像作業範例。
 
 #### 建議格式
 
@@ -544,10 +546,9 @@ Semester: Spring 2026
 
 #### 需要完成
 
-- `APPEND` 顯示下一行行號。
 - `INSERT n` 顯示插入位置對應行號。
-- 不要用 `.strip()` 移除程式碼前導空白。
-- 至少要保留縮排，否則 `LIST` 與 demo 會不好看。
+- `INSERT` 不要用 `.strip()` 移除程式碼前導空白。
+- `APPEND` 若要完全符合範例，可再改成顯示下一行行號。
 
 ---
 
@@ -643,12 +644,11 @@ tests/test_define_repl.sc
 
 ```text
 1. 補完整 CHECK semantic checker
-2. 完成 TRACE 逐 statement 輸出
-3. 實作 exit(int code)
-4. 修 APPEND / INSERT 提示與縮排保留
-5. 補 `.sc/.expected` 測試集與 runner
-6. 補公開測試 A regression test
-7. 補 test_define_repl.sc 與其他整合驗收測試
+2. 實作 exit(int code)
+3. 修 INSERT 提示與縮排保留，並視需求調整 APPEND 行號提示
+4. 補 `.sc/.expected` 測試集與 runner
+5. 補公開測試 A regression test
+6. 補 test_define_repl.sc 與其他整合驗收測試
 ```
 
 ---

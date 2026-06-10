@@ -279,6 +279,74 @@ class TestRunCommand:
         assert "zero" in out.lower()
         assert "Traceback" not in out
 
+    def test_trace_on_prints_main_statements_before_run_execution(self, monkeypatch, capsys):
+        out = self.run_repl(monkeypatch, capsys, [
+            "int main() {",
+            "int result;",
+            "result = 3 + 4;",
+            'printf("result=%d\\n", result);',
+            "return result;",
+            "}",
+            "TRACE ON",
+            "RUN",
+            "QUIT",
+            "y",
+        ])
+
+        assert "Trace mode enabled." in out
+        assert "[line 2] int result;" in out
+        assert "[line 3] result = 3 + 4;" in out
+        assert "[line 4] printf(\"result=%d\\n\", result);" in out
+        assert "result=7" in out
+        assert "Program exited with return value 7." in out
+
+    def test_trace_on_prints_user_function_statements(self, monkeypatch, capsys):
+        out = self.run_repl(monkeypatch, capsys, [
+            "int gcd(int a, int b) {",
+            "int temp;",
+            "while (b != 0) {",
+            "temp = b;",
+            "b = a % b;",
+            "a = temp;",
+            "}",
+            "return a;",
+            "}",
+            "int main() {",
+            "int result;",
+            "result = gcd(48, 18);",
+            'printf("GCD=%d\\n", result);',
+            "return 0;",
+            "}",
+            "TRACE ON",
+            "RUN",
+            "QUIT",
+            "y",
+        ])
+
+        assert "[line 11] int result;" in out
+        assert "[line 12] result = gcd(48, 18);" in out
+        assert "[line 2] int temp;" in out
+        assert "[line 4] temp = b;" in out
+        assert "GCD=6" in out
+
+    def test_trace_off_stops_printing_trace_lines(self, monkeypatch, capsys):
+        out = self.run_repl(monkeypatch, capsys, [
+            "int main() {",
+            'printf("ok\\n");',
+            "return 0;",
+            "}",
+            "TRACE ON",
+            "TRACE OFF",
+            "RUN",
+            "QUIT",
+            "y",
+        ])
+
+        assert "Trace mode enabled." in out
+        assert "Trace mode disabled." in out
+        assert "[line 2]" not in out
+        assert "ok" in out
+
 
 class TestCheckCommand:
     """測試 CHECK 指令只分析程式緩衝區，不執行 main()。"""

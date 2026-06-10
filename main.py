@@ -82,11 +82,17 @@ def run_program_buffer(buffer: list[str], macro_definitions: dict[str, str], tra
         return None
 
     runtime = interpreter.Interpreter()
-    runtime.trace_enabled = trace_enabled
+    # 函式定義與全域宣告只是 RUN 前的載入流程，不屬於 main() 的逐步執行 trace。
     load_program_declarations(runtime, program)
 
     main_call = parser.CallExpr(parser.Identifier("main", 0), [], 0)
-    return_value = runtime.evaluate(main_call)
+    # TRACE 需要保留 buffer 原始行文字，才能用 AST line number 找回使用者輸入的語句。
+    runtime.trace_source_lines = {line_number: line for line_number, line in enumerate(buffer, start=1)}
+    runtime.trace_enabled = trace_enabled
+    try:
+        return_value = runtime.evaluate(main_call)
+    finally:
+        runtime.trace_source_lines = {}
     if return_value is None:
         return_value = 0
     print(f"Program exited with return value {return_value}.")
@@ -171,28 +177,10 @@ def check_input_complete(pending_buffer: str) -> bool:
     return True
 
 if __name__ == "__main__":
-#     print(""" 
-# ╔══════════════════════════════════════════════════════════════════════════════╗
-# ║                                                                              ║
-# ║  ████████╗██████╗ ██╗██████╗ ██╗     ███████╗                                ║
-# ║  ╚══██╔══╝██╔══██╗██║██╔══██╗██║     ██╔════╝                                ║
-# ║     ██║   ██████╔╝██║██████╔╝██║     █████╗                                  ║
-# ║     ██║   ██╔══██╗██║██╔═══╝ ██║     ██╔══╝                                  ║
-# ║     ██║   ██║  ██║██║██║     ███████╗███████╗                                ║
-# ║     ╚═╝   ╚═╝  ╚═╝╚═╝╚═╝     ╚══════╝╚══════╝                                ║
-# ║                                                         (                    ║
-# ║  ███╗   ███╗███████╗ ██████╗  █████╗                     )                   ║
-# ║  ████╗ ████║██╔════╝██╔════╝ ██╔══██╗                 _..-.._                ║
-# ║  ██╔████╔██║█████╗  ██║  ███╗███████║               ,'       `.              ║
-# ║  ██║╚██╔╝██║██╔══╝  ██║   ██║██╔══██║              |  ~~~~~~~  |             ║
-# ║  ██║ ╚═╝ ██║███████╗╚██████╔╝██║  ██║               \         /              ║
-# ║  ╚═╝     ╚═╝╚══════╝ ╚═════╝ ╚═╝  ╚═╝                `-------'               ║
-# ║                                                                              ║
-# ║                                                                              ║
-# ║  >> [XXXXXX]                                                                 ║
-# ║  >> [XXXXXX]                                                                 ║
-# ╚══════════════════════════════════════════════════════════════════════════════╝
-# """)
+    print("""======================================
+Small-C Interactive Interpreter v3.0
+System Software Final Project , Spring 2026
+======================================""")
     buffer = []       # 程式碼緩衝區，儲存所有已輸入的 Small-C 程式行
     is_dirty = False  # 追蹤緩衝區是否有未儲存的修改
     # ... 初始化你的實例 ...
@@ -267,6 +255,7 @@ if __name__ == "__main__":
                 interpreter_instance = interpreter.Interpreter()
                 macro_definitions.clear()
                 is_dirty = False  # 清除後緩衝區乾淨
+                print("All cleared.")
             elif cmd == "LOAD":
                 if args:
                     # LOAD 成功後 is_dirty 重設為 False；使用者取消則維持原值

@@ -77,6 +77,21 @@ class AssignmentExpr:
         return f"AssignmentExpr({self.left}, {self.operator}, {self.right})"
 
 
+class ExpressionStmt:
+    """運算式語句 AST 節點，例如 x = 1; 或 printf("hi");。
+
+    這層包裝用來區分「真正的一個 statement」與 expression 內部節點，
+    讓 TRACE 只印出語句執行，不會誤印 printf 參數或二元運算子節點。
+    """
+
+    def __init__(self, expr, line: int):
+        self.expr = expr
+        self.line = line
+
+    def __repr__(self):
+        return f"ExpressionStmt({self.expr})"
+
+
 class CallExpr:
     """函式呼叫 AST 節點，例如 f(a, b)。"""
 
@@ -168,36 +183,40 @@ class Block:
 
 class IfStmt:
     """If 條件分支 AST 節點。"""
-    def __init__(self, condition, then_branch, else_branch=None):
+    def __init__(self, condition, then_branch, else_branch=None, line: int = 0):
         self.condition = condition
         self.then_branch = then_branch
         self.else_branch = else_branch  # 若無 else 則為 None
+        self.line = line
     def __repr__(self):
         return f"IfStmt({self.condition}, {self.then_branch}, {self.else_branch})"
 
 class WhileStmt:
     """While 迴圈 AST 節點。"""
-    def __init__(self, condition, body):
+    def __init__(self, condition, body, line: int = 0):
         self.condition = condition
         self.body = body
+        self.line = line
     def __repr__(self):
         return f"WhileStmt({self.condition}, {self.body})"
 
 class DoWhileStmt:
     """Do-while 迴圈 AST 節點。"""
-    def __init__(self, body, condition):
+    def __init__(self, body, condition, line: int = 0):
         self.body = body
         self.condition = condition
+        self.line = line
     def __repr__(self):
         return f"DoWhileStmt({self.body}, {self.condition})"
 
 class ForStmt:
     """For 迴圈 AST 節點，例如 for (init; condition; update) body。"""
-    def __init__(self, init, condition, update, body):
+    def __init__(self, init, condition, update, body, line: int = 0):
         self.init = init              # VarDecl / expression / None
         self.condition = condition    # expression / None，None 代表永遠成立
         self.update = update          # expression / None
         self.body = body              # 單一 statement 或 Block
+        self.line = line
     def __repr__(self):
         return f"ForStmt({self.init}, {self.condition}, {self.update}, {self.body})"
 
@@ -459,11 +478,12 @@ class parser:
 
         # 4. 若都不是以上情況，則視為運算式語句 (Expression Statement)
         expr = self.parse_expression()
+        line = getattr(expr, "line", token.line)
         
         # C 語言中，除了特定的控制結構外，運算式語句結尾通常需要分號。
         # (例如函數呼叫 f(); 或賦值 x = 1;)
         self.expect(";", lexer.token_type.punctuator)
-        return expr
+        return ExpressionStmt(expr, line)
 
     def parse(self):
         """解析整份輸入，依序回傳 top-level AST 節點。
@@ -813,7 +833,7 @@ class parser:
 
     def parse_if_statement(self):
         """解析 if (cond) { ... } else { ... }"""
-        self.advance() # 吃掉 'if'
+        if_token = self.advance() # 吃掉 'if'
         self.expect("(", lexer.token_type.punctuator)
         condition = self.parse_expression()
         self.expect(")", lexer.token_type.punctuator)
@@ -826,11 +846,11 @@ class parser:
         if self.match("else", lexer.token_type.keyword):
             else_branch = self.parse_statement_or_block()
 
-        return IfStmt(condition, then_branch, else_branch)
+        return IfStmt(condition, then_branch, else_branch, if_token.line)
 
     def parse_while_statement(self):
         """解析 while (cond) { ... }"""
-        self.advance() # 吃掉 'while'
+        while_token = self.advance() # 吃掉 'while'
         self.expect("(", lexer.token_type.punctuator)
         condition = self.parse_expression()
         self.expect(")", lexer.token_type.punctuator)
@@ -840,11 +860,11 @@ class parser:
             body = self.parse_statement_or_block()
         finally:
             self.loop_depth -= 1
-        return WhileStmt(condition, body)
+        return WhileStmt(condition, body, while_token.line)
 
     def parse_do_while_statement(self):
         """解析 do { ... } while (cond);"""
-        self.advance() # 吃掉 'do'
+        do_token = self.advance() # 吃掉 'do'
 
         self.loop_depth += 1
         try:
@@ -857,11 +877,11 @@ class parser:
         condition = self.parse_expression()
         self.expect(")", lexer.token_type.punctuator)
         self.expect(";", lexer.token_type.punctuator)
-        return DoWhileStmt(body, condition)
+        return DoWhileStmt(body, condition, do_token.line)
 
     def parse_for_statement(self):
         """解析 for (init; condition; update) body"""
-        self.advance() # 吃掉 'for'
+        for_token = self.advance() # 吃掉 'for'
         self.expect("(", lexer.token_type.punctuator)
 
         init = None
@@ -890,7 +910,7 @@ class parser:
             body = self.parse_statement_or_block()
         finally:
             self.loop_depth -= 1
-        return ForStmt(init, condition, update, body)
+        return ForStmt(init, condition, update, body, for_token.line)
 
     def parse_switch_statement(self):
         """解析 switch (expr) { case CONST: ... default: ... }。

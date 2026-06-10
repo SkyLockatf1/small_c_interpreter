@@ -79,13 +79,13 @@ sc> EXIT
 | 指令 | 狀態 | 說明 |
 |---|---|---|
 | `LIST` | 已實作 | 可列出全部、單行或指定範圍的程式緩衝區內容。 |
-| `EDIT` | 已實作 | 可修改指定行；直接按 Enter 會保留原行。 |
+| `EDIT` | 已實作 | 可修改指定行；直接按 Enter 會保留原行，輸入內容會保留縮排。 |
 | `DELETE` | 已實作 | 可刪除單行或指定範圍。 |
 | `INSERT` | 已實作 | 可在指定行前插入多行，以單獨一行 `.` 結束。 |
-| `APPEND` | 已實作 | 可在緩衝區尾端追加多行，以單獨一行 `.` 結束。 |
+| `APPEND` | 已實作 | 可在緩衝區尾端追加多行，以單獨一行 `.` 結束，並保留輸入縮排。 |
 | `SAVE` | 已實作 | 可將目前緩衝區寫入檔案，並處理常見寫檔錯誤。 |
 | `NEW` | 已實作 | 可清空 buffer、重建 interpreter、清除 macro 狀態；若有未儲存修改會先提示確認。 |
-| `TRACE ON/OFF` | 部分實作 | 可切換 trace 狀態，但尚未完整輸出逐 statement trace。 |
+| `TRACE ON/OFF` | 已實作 | 可切換 trace 狀態；`RUN` 時會在每個 statement 執行前輸出行號與原始語句。 |
 | `VARS` | 已實作 | 可顯示目前全域變數、陣列與指標資訊。 |
 | `FUNCS` | 已實作 | 可列出目前 interpreter 內已註冊的使用者函式與 hard-coded built-ins。 |
 | `ABOUT` | 部分實作 | 已有 ASCII art 顯示，但專案資訊仍待補齊。 |
@@ -168,6 +168,7 @@ sc> EXIT
 - `LOAD` / `SAVE` 檔案載入與寫入功能。
 - `RUN` 可從 buffer 執行 `main()` 並輸出 return value。
 - `CHECK` 已接上 lexer/parser 基礎檢查，且不執行程式。
+- `TRACE ON/OFF` 可於 `RUN` 時輸出逐 statement trace，包含使用者函式內部語句。
 - 虛擬記憶體配置、讀寫、陣列邊界檢查與指標檢查。
 - 符號表 scope stack、變數表與函式表。
 - 多數數學與字串相關內建函式。
@@ -180,10 +181,9 @@ sc> EXIT
 ### 開發中或尚未完成
 
 - `CHECK` 完整語意檢查。
-- 完整 trace 輸出。
 - `exit(int code)` 內建函式。
 - `.sc/.expected` 驗收測試檔與自動化比對流程。
-- `APPEND` / `INSERT` 保留縮排與行號提示格式。
+- `INSERT` 保留縮排與行號提示格式；`APPEND` 若要完全符合範例，可再改成顯示下一行行號。
 - 啟動畫面與版本資訊仍需補齊。
 
 ## 測試方式
@@ -198,6 +198,14 @@ sc> EXIT
 python -m pytest tests/test_interpreter.py -q
 python -m pytest tests/test_lexer.py tests/test_repl_buffer.py tests/test_repl_main.py -q
 ```
+
+也可以執行完整測試：
+
+```bash
+python -m pytest
+```
+
+目前完整測試通過：`380 passed`。
 
 ### 手動啟動測試
 
@@ -232,6 +240,19 @@ sc> LIST
 sc> SAVE demo.sc
 ```
 
+### TRACE 測試範例
+
+```text
+sc> TRACE ON
+Trace mode enabled.
+sc> RUN
+[line 2] int result;
+[line 3] result = gcd(48, 18);
+...
+sc> TRACE OFF
+Trace mode disabled.
+```
+
 ### 建議後續 `.sc/.expected` 測試目錄
 
 建議後續補上：
@@ -263,11 +284,10 @@ tests/
 ## 已知限制
 
 - `CHECK` 目前主要檢查詞法與語法，尚未完整檢查未定義符號、型別、return、`break` / `continue` 位置等語意錯誤。
-- `TRACE ON/OFF` 目前只切換狀態，尚未完整輸出每個 statement 的執行紀錄。
 - `scanf` 目前只支援 `%d` / `%c`，不支援 `%s`，且不保留跨次呼叫未消耗輸入。
 - `exit(int code)` 尚未實作。
 - 目前沒有 `.sc/.expected` 自動化驗收測試器。
-- `APPEND` / `INSERT` 目前會移除前導空白，縮排保留仍待修正。
+- `INSERT` 目前會移除前導空白，縮排保留仍待修正；`APPEND` 與 `EDIT` 已保留縮排。
 - 啟動時尚未顯示完整歡迎訊息、版本資訊與說明文字。
 - 錯誤訊息雖然多處已有處理，但仍需完整測試以避免 Python traceback 洩漏。
 
@@ -276,9 +296,8 @@ tests/
 | 優先度 | 項目 |
 |---|---|
 | P0 | 補完整 `CHECK` semantic checker。 |
-| P1 | 完成 trace statement 輸出。 |
 | P1 | 實作 `exit(int code)`。 |
-| P1 | 修正 `APPEND` / `INSERT` 提示格式與縮排保留。 |
+| P1 | 修正 `INSERT` 提示格式與縮排保留；視需求調整 `APPEND` 行號提示。 |
 | P1 | 建立 `.sc/.expected` 驗收測試資料與 runner。 |
 | P2 | 補完整專題報告與驗收清單。 |
 
